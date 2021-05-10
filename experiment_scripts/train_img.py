@@ -4,7 +4,7 @@ import os
 sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
 
 import dataio, meta_modules, utils, training, loss_functions, modules
-
+import torch
 from torch.utils.data import DataLoader
 import configargparse
 from functools import partial
@@ -50,6 +50,7 @@ elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
 else:
     raise NotImplementedError
 model.cuda()
+model = torch.nn.parallel.DistributedDataParallel(model)
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 
