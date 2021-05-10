@@ -330,10 +330,9 @@ def write_image_summary(image_resolution, model, model_input, gt,
                         model_output, writer, total_steps, prefix='train_'):
     gt_img = dataio.lin2img(gt['img'], image_resolution)
     pred_img = dataio.lin2img(model_output['model_out'], image_resolution)
-
     img_gradient = diff_operators.gradient(model_output['model_out'], model_output['model_in'])
-    img_laplace = diff_operators.laplace(model_output['model_out'], model_output['model_in'])
-
+    # img_laplace = diff_operators.laplace(model_output['model_out'], model_output['model_in'])
+    img_laplace =  diff_operators.divergence(img_gradient, model_output['model_in'])
     output_vs_gt = torch.cat((gt_img, pred_img), dim=-1)
     writer.add_image(prefix + 'gt_vs_pred', make_grid(output_vs_gt, scale_each=False, normalize=True),
                      global_step=total_steps)
