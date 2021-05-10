@@ -50,7 +50,6 @@ elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
 else:
     raise NotImplementedError
 model.cuda()
-model = torch.nn.parallel.DistributedDataParallel(model)
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 
