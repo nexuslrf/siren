@@ -191,7 +191,7 @@ class SplitFCBlock(MetaModule):
         channels = torch.split(coords, [self.feat_per_channel]*self.coord_dim, dim=-1)
         coord_h = []
         for i, ch in enumerate(channels):
-            h = self.coord_linears[0](ch, params=get_subdict(params, f'coord_linears.{i}'))
+            h = self.coord_linears[i](ch, params=get_subdict(params, f'coord_linears.{i}'))
             coord_h.append(h)
         h = torch.stack(coord_h, -2)
         h = self.coord_nl(h)
@@ -204,6 +204,18 @@ class SplitFCBlock(MetaModule):
             h = self.net[i](h, params=get_subdict(params, f'net.{i}'))
         
         return h
+    
+    def forward_channel(self, coord, channel_id):
+        h = self.coord_linears[channel_id](coord)
+        h = self.coord_nl(h)
+        for i in range(self.approx_layers):
+            h = self.net[i](h)
+        return h
+    
+    def forward_fusion(self, h):
+        for i in range(self.approx_layers, self.num_hidden_layers+1):
+            h = self.net[i](h)
+        return h
 
 
 class SingleBVPNet(MetaModule):
@@ -213,6 +225,7 @@ class SingleBVPNet(MetaModule):
                  mode='mlp', hidden_features=256, num_hidden_layers=3, split_mlp=False, **kwargs):
         super().__init__()
         self.mode = mode
+        self.split_mlp = split_mlp
         coord_dim = in_features
         if self.mode == 'rbf':
             self.rbf_layer = RBFLayer(in_features=in_features, out_features=kwargs.get('rbf_centers', 1024))
@@ -259,6 +272,22 @@ class SingleBVPNet(MetaModule):
         coords = model_input['coords'].clone().detach().requires_grad_(True)
         activations = self.net.forward_with_activations(coords)
         return {'model_in': coords, 'model_out': activations.popitem(), 'activations': activations}
+    
+    def forward_split_channel(self, coord, channel_id):
+        if not self.split_mlp:
+            return None
+        if self.image_downsampling.downsample:
+            coord = self.image_downsampling(coord)
+        if self.mode == 'rbf':
+            coord = self.rbf_layer(coord)
+        elif self.mode == 'nerf':
+            coord = self.positional_encoding(coord, single_channel=True)
+        channel_feat = self.net.forward_channel(coord, channel_id)
+        return channel_feat
+    
+    def forward_split_fusion(self, h):
+        # h = torch.stack(feats, -1).sum(-1)
+        return self.net.forward_fusion(h)
 
 
 class PINNet(nn.Module):
@@ -344,8 +373,15 @@ class PosEncodingNeRF(nn.Module):
         nyquist_rate = 1 / (2 * (2 * 1 / samples))
         return int(math.floor(math.log(nyquist_rate, 2)))
 
-    def forward(self, coords):
-        coords = coords.view(coords.shape[0], -1, self.in_features)
+    def forward(self, coords, single_channel=False):
+        if single_channel:
+            in_features = 1
+            out_dim = self.out_dim // self.in_features
+        else:
+            in_features = self.in_features
+            out_dim = self.out_dim
+
+        coords = coords.view(coords.shape[0], -1, in_features)
         coords_pos_enc = coords.unsqueeze(-2) * \
             self.freq_bands.reshape([1]*(len(coords.shape)-1) + [-1, 1])
         sin = torch.sin(coords_pos_enc)
@@ -355,7 +391,7 @@ class PosEncodingNeRF(nn.Module):
 
         if self.freq_last:
             sh = coords_pos_enc.shape[:-1]
-            coords_pos_enc = coords_pos_enc.reshape(*sh, -1, self.in_features).transpose(-1,-2).reshape(*sh, -1)
+            coords_pos_enc = coords_pos_enc.reshape(*sh, -1, in_features).transpose(-1,-2).reshape(*sh, -1)
 
         # coords_pos_enc = coords
         # for i in range(self.num_frequencies):
@@ -367,7 +403,7 @@ class PosEncodingNeRF(nn.Module):
 
         #         coords_pos_enc = torch.cat((coords_pos_enc, sin, cos), axis=-1)
 
-        return coords_pos_enc.reshape(coords.shape[0], -1, self.out_dim)
+        return coords_pos_enc.reshape(coords.shape[0], -1, out_dim)
 
 
 class RBFLayer(nn.Module):

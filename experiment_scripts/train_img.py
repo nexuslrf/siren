@@ -61,3 +61,16 @@ summary_fn = partial(utils.write_image_summary, image_resolution)
 training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
                steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn)
+
+# # test image
+
+# with torch.no_grad():
+#     model_input = {'coords': dataio.get_mgrid(512).cuda()}
+#     model_output = model(model_input)
+
+# with torch.no_grad():
+#     x = torch.linspace(-1,1,512).cuda()
+#     y = torch.linspace(-1,1,512).cuda()
+#     x_feat = model.forward_split_channel(x, 0)
+#     y_feat = model.forward_split_channel(y, 1)
+#     model_output = model.forward_split_fusion(x_feat.unsqueeze(1) + y_feat.unsqueeze(0))
