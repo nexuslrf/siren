@@ -33,6 +33,7 @@ p.add_argument('--model_type', type=str, default='sine',
                     'and in the future: "mixed" (first layer sine, other layers tanh)')
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
+p.add_argument('--split_mlp', action='store_true')
 opt = p.parse_args()
 
 img_dataset = dataio.Camera()
@@ -44,9 +45,9 @@ dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, 
 # Define the model.
 if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'tanh' or opt.model_type == 'selu' or opt.model_type == 'elu'\
         or opt.model_type == 'softplus':
-    model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', sidelength=image_resolution)
+    model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', sidelength=image_resolution, split_mlp=opt.split_mlp)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
-    model = modules.SingleBVPNet(type='relu', mode=opt.model_type, sidelength=image_resolution)
+    model = modules.SingleBVPNet(type='relu', mode=opt.model_type, sidelength=image_resolution, split_mlp=opt.split_mlp)
 else:
     raise NotImplementedError
 model.cuda()
