@@ -146,7 +146,7 @@ class SplitFCBlock(MetaModule):
                          'elu':(nn.ELU(inplace=True), init_weights_elu, None)}
 
         nl, nl_weight_init, first_layer_init = nls_and_inits[nonlinearity]
-        split_scale = 2 if nonlinearity == 'sine' else 1
+        split_scale = 1 if nonlinearity == 'sine' else 1
 
         if weight_init is not None:  # Overwrite weight init if passed
             self.weight_init = weight_init
@@ -198,8 +198,8 @@ class SplitFCBlock(MetaModule):
 
         for i in range(self.approx_layers):
             h = self.net[i](h, params=get_subdict(params, f'net.{i}'))
-        h = h.sum(-2)
-        # h = h.prod(-2)
+        # h = h.sum(-2)
+        h = h.prod(-2)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
             h = self.net[i](h, params=get_subdict(params, f'net.{i}'))
         
