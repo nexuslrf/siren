@@ -9,7 +9,7 @@ import time
 import numpy as np
 import os
 import shutil
-
+from collections import OrderedDict
 
 def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_checkpoint, model_dir, loss_fn,
           summary_fn, val_dataloader=None, double_precision=False, clip_grad=False, use_lbfgs=False, loss_schedules=None):
@@ -49,61 +49,10 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
 
             for step, (model_input, gt) in enumerate(train_dataloader):
                 start_time = time.time()
-            
-                model_input = {key: value.cuda() for key, value in model_input.items()}
-                gt = {key: value.cuda() for key, value in gt.items()}
 
-                if double_precision:
-                    model_input = {key: value.double() for key, value in model_input.items()}
-                    gt = {key: value.double() for key, value in gt.items()}
-
-                if use_lbfgs:
-                    def closure():
-                        optim.zero_grad()
-                        model_output = model(model_input)
-                        losses = loss_fn(model_output, gt)
-                        train_loss = 0.
-                        for loss_name, loss in losses.items():
-                            train_loss += loss.mean() 
-                        train_loss.backward()
-                        return train_loss
-                    optim.step(closure)
-
-                model_output = model(model_input)
-                losses = loss_fn(model_output, gt)
-
-                train_loss = 0.
-                for loss_name, loss in losses.items():
-                    single_loss = loss.mean()
-
-                    if loss_schedules is not None and loss_name in loss_schedules:
-                        writer.add_scalar(loss_name + "_weight", loss_schedules[loss_name](total_steps), total_steps)
-                        single_loss *= loss_schedules[loss_name](total_steps)
-
-                    writer.add_scalar(loss_name, single_loss, total_steps)
-                    train_loss += single_loss
-
-                train_losses.append(train_loss.item())
-                writer.add_scalar("total_train_loss", train_loss, total_steps)
-
-                if not total_steps % steps_til_summary:
-                    torch.save(model.state_dict(),
-                               os.path.join(checkpoints_dir, 'model_current.pth'))
-                    # with torch.no_grad():
-                    #     model_output = model({'coords': model_input['coords'] * 0.6 + 0.2})
-                    summary_fn(model, model_input, gt, model_output, writer, total_steps)
-
-                if not use_lbfgs:
-                    optim.zero_grad()
-                    train_loss.backward()
-
-                    if clip_grad:
-                        if isinstance(clip_grad, bool):
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.)
-                        else:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad)
-
-                    optim.step()
+                train_loss = train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writer, train_losses,
+                            total_steps, double_precision, use_lbfgs, steps_til_summary, 
+                            checkpoints_dir, summary_fn, clip_grad)
 
                 pbar.update(1)
 
@@ -124,12 +73,73 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
                         model.train()
 
                 total_steps += 1
+                # torch.cuda.empty_cache()
 
         torch.save(model.state_dict(),
                    os.path.join(checkpoints_dir, 'model_final.pth'))
         np.savetxt(os.path.join(checkpoints_dir, 'train_losses_final.txt'),
                    np.array(train_losses))
 
+def train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writer, train_losses,
+    total_steps, double_precision, use_lbfgs, steps_til_summary, checkpoints_dir, summary_fn, clip_grad):
+
+    model_input = {key: value.cuda() for key, value in model_input.items()}
+    gt = {key: value.cuda() for key, value in gt.items()}
+
+    if double_precision:
+        model_input = {key: value.double() for key, value in model_input.items()}
+        gt = {key: value.double() for key, value in gt.items()}
+
+    if use_lbfgs:
+        def closure():
+            optim.zero_grad()
+            model_output = model(model_input)
+            losses = loss_fn(model_output, gt)
+            train_loss = 0.
+            for loss_name, loss in losses.items():
+                train_loss += loss.mean() 
+            train_loss.backward()
+            return train_loss
+        optim.step(closure)
+
+    # print(model_input['coords'].shape)
+    model_output = model(model_input) #, params=OrderedDict(model.named_parameters()))
+    # print(model_output['model_out'].shape)
+    losses = loss_fn(model_output, gt)
+
+    train_loss = 0.
+    for loss_name, loss in losses.items():
+        single_loss = loss.mean()
+
+        if loss_schedules is not None and loss_name in loss_schedules:
+            writer.add_scalar(loss_name + "_weight", loss_schedules[loss_name](total_steps), total_steps)
+            single_loss *= loss_schedules[loss_name](total_steps)
+
+        writer.add_scalar(loss_name, single_loss, total_steps)
+        train_loss += single_loss
+
+    train_losses.append(train_loss.item())
+    writer.add_scalar("total_train_loss", train_loss, total_steps)
+
+    if not total_steps % steps_til_summary:
+        torch.save(model.state_dict(),
+                    os.path.join(checkpoints_dir, 'model_current.pth'))
+        # with torch.no_grad():
+        #     model_output = model({'coords': model_input['coords'] * 0.6 + 0.2})
+        summary_fn(model, model_input, gt, model_output, writer, total_steps)
+
+    if not use_lbfgs:
+        optim.zero_grad()
+        train_loss.backward()
+
+        if clip_grad:
+            if isinstance(clip_grad, bool):
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.)
+            else:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_grad)
+
+        optim.step()
+    return train_loss.item()
 
 class LinearDecaySchedule():
     def __init__(self, start_val, final_val, num_steps):

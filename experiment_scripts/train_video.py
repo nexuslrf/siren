@@ -6,7 +6,7 @@ import os
 sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
 
 import dataio, meta_modules, utils, training, loss_functions, modules
-
+import torch
 from torch.utils.data import DataLoader
 import configargparse
 from functools import partial
@@ -38,6 +38,7 @@ p.add_argument('--sample_frac', type=float, default=38e-4,
                help='What fraction of video pixels to sample in each batch (default is all)')
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
+p.add_argument('--split_mlp', action='store_true')
 opt = p.parse_args()
 
 if opt.dataset == 'cat':
@@ -46,17 +47,22 @@ elif opt.dataset == 'bikes':
     video_path = skvideo.datasets.bikes()
 
 vid_dataset = dataio.Video(video_path)
-coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, sample_fraction=opt.sample_frac)
+coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, sample_fraction=opt.sample_frac, batch_size=opt.batch_size)
 dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=0)
 
 # Define the model.
 if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'tanh':
     model = modules.SingleBVPNet(type=opt.model_type, in_features=3, out_features=vid_dataset.channels,
-                                 mode='mlp', hidden_features=1024, num_hidden_layers=3)
+                                 mode='mlp', hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
-    model = modules.SingleBVPNet(type='relu', in_features=3, out_features=vid_dataset.channels, mode=opt.model_type)
+    model = modules.SingleBVPNet(type='relu', in_features=3, out_features=vid_dataset.channels, mode=opt.model_type, 
+                                 hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp)
 else:
     raise NotImplementedError
+
+model.module_prefix  = "module."
+model.net.module_prefix = "module."
+model = torch.nn.parallel.DataParallel(model)
 model.cuda()
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)

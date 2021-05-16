@@ -17,10 +17,11 @@ class BatchLinear(nn.Linear, MetaModule):
 
     def forward(self, input, params=None):
         if params is None:
-            params = OrderedDict(self.named_parameters())
-
-        bias = params.get('bias', None)
-        weight = params['weight']
+            weight = self.weight
+            bias  = self.bias
+        else:
+            bias = params.get('bias', None)
+            weight = params['weight']
 
         output = input.matmul(weight.permute(*[i for i in range(len(weight.shape) - 2)], -1, -2))
         output += bias.unsqueeze(-2) / self.num_input
@@ -134,6 +135,7 @@ class SplitFCBlock(MetaModule):
         self.feat_per_channel = in_features // coord_dim
         self.approx_layers = approx_layers
         self.num_hidden_layers = num_hidden_layers
+        self.module_prefix = ""
 
         # Dictionary that maps nonlinearity name to the respective function, initialization, and, if applicable,
         # special first-layer initialization scheme
@@ -191,17 +193,17 @@ class SplitFCBlock(MetaModule):
         channels = torch.split(coords, [self.feat_per_channel]*self.coord_dim, dim=-1)
         coord_h = []
         for i, ch in enumerate(channels):
-            h = self.coord_linears[i](ch, params=get_subdict(params, f'coord_linears.{i}'))
+            h = self.coord_linears[i](ch)
             coord_h.append(h)
         h = torch.stack(coord_h, -2)
         h = self.coord_nl(h)
 
         for i in range(self.approx_layers):
-            h = self.net[i](h, params=get_subdict(params, f'net.{i}'))
+            h = self.net[i](h)
         # h = h.sum(-2)
         h = h.prod(-2)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
-            h = self.net[i](h, params=get_subdict(params, f'net.{i}'))
+            h = self.net[i](h)
         
         return h
     
@@ -226,6 +228,7 @@ class SingleBVPNet(MetaModule):
         super().__init__()
         self.mode = mode
         self.split_mlp = split_mlp
+        self.module_prefix = ""
         coord_dim = in_features
         if self.mode == 'rbf':
             self.rbf_layer = RBFLayer(in_features=in_features, out_features=kwargs.get('rbf_centers', 1024))
@@ -264,7 +267,7 @@ class SingleBVPNet(MetaModule):
         elif self.mode == 'nerf':
             coords = self.positional_encoding(coords)
 
-        output = self.net(coords, get_subdict(params, 'net'))
+        output = self.net(coords, get_subdict(params, self.module_prefix + 'net'))
         return {'model_in': coords_org, 'model_out': output}
 
     def forward_with_activations(self, model_input):

@@ -643,7 +643,7 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
 
 
 class Implicit3DWrapper(torch.utils.data.Dataset):
-    def __init__(self, dataset, sidelength=None, sample_fraction=1.):
+    def __init__(self, dataset, sidelength=None, sample_fraction=1., batch_size=1):
 
         if isinstance(sidelength, int):
             sidelength = 3 * (sidelength,)
@@ -654,9 +654,10 @@ class Implicit3DWrapper(torch.utils.data.Dataset):
         self.data = data.view(-1, self.dataset.channels)
         self.sample_fraction = sample_fraction
         self.N_samples = int(self.sample_fraction * self.mgrid.shape[0])
+        self.batch_size = batch_size
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.dataset) * self.batch_size
 
     def __getitem__(self, idx):
         if self.sample_fraction < 1.:
