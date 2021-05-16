@@ -39,6 +39,7 @@ p.add_argument('--sample_frac', type=float, default=38e-4,
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
 p.add_argument('--split_mlp', action='store_true')
+p.add_argument('--st_split', action='store_true')
 opt = p.parse_args()
 
 if opt.dataset == 'cat':
@@ -50,13 +51,18 @@ vid_dataset = dataio.Video(video_path)
 coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, sample_fraction=opt.sample_frac, batch_size=opt.batch_size)
 dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=0)
 
+if opt.st_split:
+    split_rule = [1,2]
+else:
+    split_rule = [1,1,1]
+
 # Define the model.
 if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'tanh':
     model = modules.SingleBVPNet(type=opt.model_type, in_features=3, out_features=vid_dataset.channels,
-                                 mode='mlp', hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp)
+                                 mode='mlp', hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp, split_rule=split_rule)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
     model = modules.SingleBVPNet(type='relu', in_features=3, out_features=vid_dataset.channels, mode=opt.model_type, 
-                                 hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp)
+                                 hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp, split_rule=split_rule)
 else:
     raise NotImplementedError
 
