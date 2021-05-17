@@ -17,10 +17,11 @@ class BatchLinear(nn.Linear, MetaModule):
 
     def forward(self, input, params=None):
         if params is None:
-            params = OrderedDict(self.named_parameters())
-
-        bias = params.get('bias', None)
-        weight = params['weight']
+            weight = self.weight
+            bias  = self.bias
+        else:
+            bias = params.get('bias', None)
+            weight = params['weight']
 
         output = input.matmul(weight.permute(*[i for i in range(len(weight.shape) - 2)], -1, -2))
         output += bias.unsqueeze(-2) / self.num_input
@@ -126,14 +127,20 @@ class SplitFCBlock(MetaModule):
     '''
 
     def __init__(self, in_features, out_features, num_hidden_layers, hidden_features,
-                 outermost_linear=False, nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2):
+                 outermost_linear=False, nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2, split_rule=None):
         super().__init__()
 
         self.first_layer_init = None
         self.coord_dim = coord_dim
-        self.feat_per_channel = in_features // coord_dim
+        feat_per_channel = in_features // coord_dim
+        if split_rule is None:
+            self.feat_per_channel = [feat_per_channel] * coord_dim
+        else:
+            self.feat_per_channel = [feat_per_channel * k for k in split_rule]
+        self.split_channels = len(self.feat_per_channel)
         self.approx_layers = approx_layers
         self.num_hidden_layers = num_hidden_layers
+        self.module_prefix = ""
 
         # Dictionary that maps nonlinearity name to the respective function, initialization, and, if applicable,
         # special first-layer initialization scheme
@@ -146,7 +153,7 @@ class SplitFCBlock(MetaModule):
                          'elu':(nn.ELU(inplace=True), init_weights_elu, None)}
 
         nl, nl_weight_init, first_layer_init = nls_and_inits[nonlinearity]
-        split_scale = 2 if nonlinearity == 'sine' else 1
+        split_scale = 1 if nonlinearity == 'sine' else 1
 
         if weight_init is not None:  # Overwrite weight init if passed
             self.weight_init = weight_init
@@ -154,10 +161,11 @@ class SplitFCBlock(MetaModule):
             self.weight_init = nl_weight_init
 
         self.coord_linears = nn.ModuleList(
-            [BatchLinear(self.feat_per_channel, hidden_features) for i in range(coord_dim)]
+            [BatchLinear(feat, hidden_features) for feat in self.feat_per_channel]
         )
         self.coord_nl = nl
         self.coord_nl.split_scale = split_scale
+
         if first_layer_init is not None: # Apply special initialization to first layer, if applicable.
             self.coord_linears.apply(first_layer_init)
         else:
@@ -181,27 +189,27 @@ class SplitFCBlock(MetaModule):
         if self.weight_init is not None:
             self.net.apply(self.weight_init)
         for i in range(self.approx_layers):
-            self.net[i][0].num_input = coord_dim
+            self.net[i][0].num_input = self.split_channels
             self.net[i][1].split_scale = split_scale
 
     def forward(self, coords, params=None, **kwargs):
         if params is None:
             params = OrderedDict(self.named_parameters())
 
-        channels = torch.split(coords, [self.feat_per_channel]*self.coord_dim, dim=-1)
+        channels = torch.split(coords, self.feat_per_channel, dim=-1)
         coord_h = []
         for i, ch in enumerate(channels):
-            h = self.coord_linears[i](ch, params=get_subdict(params, f'coord_linears.{i}'))
+            h = self.coord_linears[i](ch)
             coord_h.append(h)
         h = torch.stack(coord_h, -2)
         h = self.coord_nl(h)
 
         for i in range(self.approx_layers):
-            h = self.net[i](h, params=get_subdict(params, f'net.{i}'))
-        h = h.sum(-2)
-        # h = h.prod(-2)
+            h = self.net[i](h)
+        # h = h.sum(-2)
+        h = h.prod(-2)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
-            h = self.net[i](h, params=get_subdict(params, f'net.{i}'))
+            h = self.net[i](h)
         
         return h
     
@@ -221,11 +229,12 @@ class SplitFCBlock(MetaModule):
 class SingleBVPNet(MetaModule):
     '''A canonical representation network for a BVP.'''
 
-    def __init__(self, out_features=1, type='sine', in_features=2,
-                 mode='mlp', hidden_features=256, num_hidden_layers=3, split_mlp=False, **kwargs):
+    def __init__(self, out_features=1, type='sine', in_features=2, mode='mlp', hidden_features=256, 
+        num_hidden_layers=3, split_mlp=False, split_rule=None, **kwargs):
         super().__init__()
         self.mode = mode
         self.split_mlp = split_mlp
+        self.module_prefix = ""
         coord_dim = in_features
         if self.mode == 'rbf':
             self.rbf_layer = RBFLayer(in_features=in_features, out_features=kwargs.get('rbf_centers', 1024))
@@ -245,7 +254,7 @@ class SingleBVPNet(MetaModule):
                                hidden_features=hidden_features, outermost_linear=True, nonlinearity=type)
         else:
             self.net = SplitFCBlock(in_features=in_features, out_features=out_features, num_hidden_layers=num_hidden_layers,
-                               hidden_features=hidden_features, outermost_linear=True, nonlinearity=type, coord_dim=coord_dim)
+                               hidden_features=hidden_features, outermost_linear=True, nonlinearity=type, coord_dim=coord_dim, split_rule=split_rule)
         print(self)
 
     def forward(self, model_input, params=None):
@@ -264,7 +273,7 @@ class SingleBVPNet(MetaModule):
         elif self.mode == 'nerf':
             coords = self.positional_encoding(coords)
 
-        output = self.net(coords, get_subdict(params, 'net'))
+        output = self.net(coords, get_subdict(params, self.module_prefix + 'net'))
         return {'model_in': coords_org, 'model_out': output}
 
     def forward_with_activations(self, model_input):
