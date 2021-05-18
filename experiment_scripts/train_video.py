@@ -2,7 +2,7 @@
 
 # Enable import from parent package
 import sys
-import os
+import os, time
 sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
 
 import dataio, meta_modules, utils, training, loss_functions, modules
@@ -66,9 +66,9 @@ elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
 else:
     raise NotImplementedError
 
-model.module_prefix  = "module."
-model.net.module_prefix = "module."
-model = torch.nn.parallel.DataParallel(model)
+# model.module_prefix  = "module."
+# model.net.module_prefix = "module."
+# model = torch.nn.parallel.DataParallel(model)
 model.cuda()
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
@@ -77,6 +77,36 @@ root_path = os.path.join(opt.logging_root, opt.experiment_name)
 loss_fn = partial(loss_functions.image_mse, None)
 summary_fn = partial(utils.write_video_summary, vid_dataset)
 
-training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
-               steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
-               model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn)
+# training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
+#                steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
+#                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn)
+
+# with torch.no_grad():
+#     dataio.get_mgrid([10, 272, 640], dim=3)
+
+vid_len = 100
+with torch.no_grad():
+    pts_in = dataio.get_mgrid([vid_len, 272, 640], dim=3).reshape(vid_len, -1, 3)
+    t0 = time.time()
+    for i in range(vid_len):
+        model_input = {'coords': pts_in[i].cuda()}
+        model_output = model(model_input)
+        f"{model_output['model_out'][...,0]}"
+    t1 = time.time()
+    print(f"Time consumed: {(t1-t0)/vid_len}")
+
+# with torch.no_grad():
+#     x = torch.linspace(-1,1,272).cuda()
+#     y = torch.linspace(-1,1,640).cuda()
+#     t = torch.linspace(-1,1,vid_len).cuda()
+#     t0 = time.time()
+#     x_feat = model.forward_split_channel(x, 1)
+#     y_feat = model.forward_split_channel(y, 2)
+#     t_feat = model.forward_split_channel(t, 0).unsqueeze(1)
+#     f_feat = x_feat.unsqueeze(1) + y_feat.unsqueeze(0)
+#     print(t_feat.shape, f_feat.shape)
+#     for i in range(vid_len):
+#         model_output = model.forward_split_fusion(f_feat + t_feat[i])
+#         f"{model_output[...,0]}"
+#     t1 = time.time()
+#     print(f"Time consumed: {(t1-t0)/vid_len}")
