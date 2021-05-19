@@ -35,6 +35,8 @@ p.add_argument('--model_type', type=str, default='sine',
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
 p.add_argument('--split_mlp', action='store_true')
+p.add_argument('--speed_test', action='store_true')
+p.add_argument('--test_dim', type=int, default=512)
 opt = p.parse_args()
 
 img_dataset = dataio.Camera()
@@ -59,29 +61,31 @@ root_path = os.path.join(opt.logging_root, opt.experiment_name)
 loss_fn = partial(loss_functions.image_mse, None)
 summary_fn = partial(utils.write_image_summary, image_resolution)
 
-# training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
-#                steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
-#                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn)
-
+if not opt.speed_test:
+    training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
+                steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
+                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn)
 # # test image
-
-with torch.no_grad():
-    model_input = {'coords': dataio.get_mgrid(512).cuda()}
-    t0 = time.time()
-    for i in range(10):
-        model_output = model(model_input)
-        f"{model_output['model_out'][...,0]}"
-    t1 = time.time()
-    print(f"Time consumed: {(t1-t0)/10}")
-
-with torch.no_grad():
-    x = torch.linspace(-1,1,512).cuda()
-    y = torch.linspace(-1,1,512).cuda()
-    t0 = time.time()
-    for i in range(10):
-        x_feat = model.forward_split_channel(x, 0)
-        y_feat = model.forward_split_channel(y, 1)
-        model_output = model.forward_split_fusion(x_feat.unsqueeze(1) + y_feat.unsqueeze(0))
-        f"{model_output[...,0]}"
-    t1 = time.time()
-    print(f"Time consumed: {(t1-t0)/10}")
+else:
+    test_len = 50
+    if not opt.split_mlp:
+        with torch.no_grad():
+            model_input = {'coords': dataio.get_mgrid(opt.test_dim).cuda()}
+            t0 = time.time()
+            for i in range(test_len):
+                model_output = model(model_input)
+                f"{model_output['model_out'][...,0]}"
+            t1 = time.time()
+            print(f"Time consumed: {(t1-t0)/test_len}")
+    else:
+        with torch.no_grad():
+            x = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
+            y = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
+            t0 = time.time()
+            for i in range(test_len):
+                x_feat = model.forward_split_channel(x, 0)
+                y_feat = model.forward_split_channel(y, 1)
+                model_output = model.forward_split_fusion(x_feat.unsqueeze(1) + y_feat.unsqueeze(0))
+                f"{model_output[...,0]}"
+            t1 = time.time()
+            print(f"Time consumed: {(t1-t0)/test_len}")
