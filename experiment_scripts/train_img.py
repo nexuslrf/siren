@@ -37,6 +37,10 @@ p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained mo
 p.add_argument('--split_mlp', action='store_true')
 p.add_argument('--speed_test', action='store_true')
 p.add_argument('--test_dim', type=int, default=512)
+p.add_argument('--approx_layers', type=int, default=2)
+p.add_argument('--act_scale', type=float, default=1)
+p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
+p.add_argument('--fusion_before_act', action='store_true')
 opt = p.parse_args()
 
 img_dataset = dataio.Camera()
@@ -48,9 +52,11 @@ dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, 
 # Define the model.
 if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'tanh' or opt.model_type == 'selu' or opt.model_type == 'elu'\
         or opt.model_type == 'softplus':
-    model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', sidelength=image_resolution, split_mlp=opt.split_mlp)
+    model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', sidelength=image_resolution, split_mlp=opt.split_mlp, 
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
-    model = modules.SingleBVPNet(type='relu', mode=opt.model_type, sidelength=image_resolution, split_mlp=opt.split_mlp)
+    model = modules.SingleBVPNet(type='relu', mode=opt.model_type, sidelength=image_resolution, split_mlp=opt.split_mlp,
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act)
 else:
     raise NotImplementedError
 model.cuda()

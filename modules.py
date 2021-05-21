@@ -127,7 +127,8 @@ class SplitFCBlock(MetaModule):
     '''
 
     def __init__(self, in_features, out_features, num_hidden_layers, hidden_features,
-                 outermost_linear=False, nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2, split_rule=None):
+                 outermost_linear=False, nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2, 
+                 split_rule=None, fusion_operator='sum', act_scale=1, fusion_before_act=False):
         super().__init__()
 
         self.first_layer_init = None
@@ -141,6 +142,11 @@ class SplitFCBlock(MetaModule):
         self.approx_layers = approx_layers
         self.num_hidden_layers = num_hidden_layers
         self.module_prefix = ""
+        self.fusion_operator = fusion_operator
+        self.fusion_before_act = fusion_before_act
+        self.out_features = out_features
+        last_layer_features = hidden_features \
+            if approx_layers == num_hidden_layers + 1 else out_features
 
         # Dictionary that maps nonlinearity name to the respective function, initialization, and, if applicable,
         # special first-layer initialization scheme
@@ -153,7 +159,7 @@ class SplitFCBlock(MetaModule):
                          'elu':(nn.ELU(inplace=True), init_weights_elu, None)}
 
         nl, nl_weight_init, first_layer_init = nls_and_inits[nonlinearity]
-        split_scale = 1 if nonlinearity == 'sine' else 1
+        split_scale = act_scale
 
         if weight_init is not None:  # Overwrite weight init if passed
             self.weight_init = weight_init
@@ -179,18 +185,21 @@ class SplitFCBlock(MetaModule):
             ))
 
         if outermost_linear:
-            self.net.append(MetaSequential(BatchLinear(hidden_features, out_features)))
+            self.net.append(MetaSequential(BatchLinear(hidden_features, last_layer_features)))
         else:
             self.net.append(MetaSequential(
-                BatchLinear(hidden_features, out_features), nl
+                BatchLinear(hidden_features, last_layer_features), nl
             ))
 
         self.net = MetaSequential(*self.net)
         if self.weight_init is not None:
             self.net.apply(self.weight_init)
         for i in range(self.approx_layers):
-            self.net[i][0].num_input = self.split_channels
-            self.net[i][1].split_scale = split_scale
+            try:
+                self.net[i][0].num_input = self.split_channels
+                self.net[i][1].split_scale = split_scale
+            except:
+                pass
 
     def forward(self, coords, params=None, **kwargs):
         if params is None:
@@ -204,13 +213,30 @@ class SplitFCBlock(MetaModule):
         h = torch.stack(coord_h, -2)
         h = self.coord_nl(h)
 
-        for i in range(self.approx_layers):
-            h = self.net[i](h)
-        # h = h.sum(-2)
-        h = h.prod(-2)
-        for i in range(self.approx_layers, self.num_hidden_layers+1):
+        for i in range(self.approx_layers-1):
             h = self.net[i](h)
         
+        # layer before fusion
+        if not self.fusion_before_act:
+            # for simple fusion strategies
+            h = self.net[self.approx_layers-1](h)
+            if self.fusion_operator == 'sum':
+                h = h.sum(-2)
+            elif self.fusion_operator == 'prod':
+                h = h.prod(-2)
+        else:
+            # fusion before activation
+            h = self.net[self.approx_layers-1][0](h)
+            if self.fusion_operator == 'sum':
+                h = h.sum(-2)
+            elif self.fusion_operator == 'prod':
+                h = h.prod(-2)
+            h = self.net[self.approx_layers-1][1](h)
+
+        if self.approx_layers == self.num_hidden_layers + 1:
+            h = h.sum(-1, keepdim=True)
+        for i in range(self.approx_layers, self.num_hidden_layers+1):
+            h = self.net[i](h)
         return h
     
     def forward_channel(self, coord, channel_id):
@@ -232,6 +258,7 @@ class SingleBVPNet(MetaModule):
     def __init__(self, out_features=1, type='sine', in_features=2, mode='mlp', hidden_features=256, 
         num_hidden_layers=3, split_mlp=False, split_rule=None, **kwargs):
         super().__init__()
+        print(kwargs)
         self.mode = mode
         self.split_mlp = split_mlp
         self.module_prefix = ""
@@ -254,7 +281,12 @@ class SingleBVPNet(MetaModule):
                                hidden_features=hidden_features, outermost_linear=True, nonlinearity=type)
         else:
             self.net = SplitFCBlock(in_features=in_features, out_features=out_features, num_hidden_layers=num_hidden_layers,
-                               hidden_features=hidden_features, outermost_linear=True, nonlinearity=type, coord_dim=coord_dim, split_rule=split_rule)
+                               hidden_features=hidden_features, outermost_linear=True, nonlinearity=type, coord_dim=coord_dim, split_rule=split_rule, 
+                               approx_layers=kwargs.get('approx_layers', 2),
+                               act_scale=kwargs.get("act_scale", 1),
+                               fusion_operator=kwargs.get("fusion_operator", 'prod'),
+                               fusion_before_act=kwargs.get("fusion_before_act", False),
+                               )
         print(self)
 
     def forward(self, model_input, params=None):
