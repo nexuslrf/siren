@@ -201,7 +201,7 @@ class SplitFCBlock(MetaModule):
             except:
                 pass
 
-    def forward(self, coords, params=None, **kwargs):
+    def forward(self, coords, params=None, pos_codes=None, **kwargs):
         if params is None:
             params = OrderedDict(self.named_parameters())
 
@@ -220,7 +220,11 @@ class SplitFCBlock(MetaModule):
         if not self.fusion_before_act:
             # for simple fusion strategies
             h = self.net[self.approx_layers-1](h)
-            if self.fusion_operator == 'sum':
+            if pos_codes is not None:
+                # h = (h * pos_codes).sum(-2)
+                h = (h + pos_codes).prod(-2)
+
+            elif self.fusion_operator == 'sum':
                 h = h.sum(-2)
             elif self.fusion_operator == 'prod':
                 h = h.prod(-2)
@@ -256,11 +260,12 @@ class SingleBVPNet(MetaModule):
     '''A canonical representation network for a BVP.'''
 
     def __init__(self, out_features=1, type='sine', in_features=2, mode='mlp', hidden_features=256, 
-        num_hidden_layers=3, split_mlp=False, split_rule=None, **kwargs):
+        num_hidden_layers=3, split_mlp=False, split_rule=None, pos_enc=False, **kwargs):
         super().__init__()
         print(kwargs)
         self.mode = mode
         self.split_mlp = split_mlp
+        self.pos_enc = pos_enc
         self.module_prefix = ""
         coord_dim = in_features
         if self.mode == 'rbf':
@@ -273,7 +278,22 @@ class SingleBVPNet(MetaModule):
                                                        use_nyquist=kwargs.get('use_nyquist', True),
                                                        freq_last=split_mlp)
             in_features = self.positional_encoding.out_dim
-
+        elif pos_enc:
+            positional_encoding = PosEncodingNeRF(in_features=1,
+                                                    sidelength=kwargs.get('sidelength', None),
+                                                    fn_samples=kwargs.get('fn_samples', None),
+                                                    use_nyquist=kwargs.get('use_nyquist', True),
+                                                    freq_last=split_mlp)
+            pe_features = positional_encoding.out_dim
+            self.pos_encoder = nn.Sequential(
+                *[
+                    positional_encoding,
+                    nn.Linear(pe_features, hidden_features),
+                    nn.ReLU(inplace=True),
+                    nn.Linear(hidden_features, hidden_features)
+                ]
+            )
+            
         self.image_downsampling = ImageDownsampling(sidelength=kwargs.get('sidelength', None),
                                                     downsample=kwargs.get('downsample', False))
         if not split_mlp:
@@ -304,8 +324,15 @@ class SingleBVPNet(MetaModule):
             coords = self.rbf_layer(coords)
         elif self.mode == 'nerf':
             coords = self.positional_encoding(coords)
-
-        output = self.net(coords, get_subdict(params, self.module_prefix + 'net'))
+        
+        if self.pos_enc:
+            coord_dim = coords.shape[-1]
+            pos_codes = self.pos_encoder(coords.unsqueeze(-1))
+            pos_codes = pos_codes.reshape(pos_codes.shape[0], -1, coord_dim, pos_codes.shape[-1])
+                # pos_codes = pos_codes.sum(-2, keepdim=True) - pos_codes
+            output = self.net(coords, get_subdict(params, self.module_prefix + 'net'), pos_codes=pos_codes)
+        else:
+            output = self.net(coords, get_subdict(params, self.module_prefix + 'net'))
         return {'model_in': coords_org, 'model_out': output}
 
     def forward_with_activations(self, model_input):
@@ -402,7 +429,8 @@ class PosEncodingNeRF(nn.Module):
             if use_nyquist:
                 self.num_frequencies = self.get_num_frequencies_nyquist(min(sidelength[0], sidelength[1]))
         elif self.in_features == 1:
-            assert fn_samples is not None
+            if fn_samples is None:
+                fn_samples = min(sidelength[0], sidelength[1])
             self.num_frequencies = 4
             if use_nyquist:
                 self.num_frequencies = self.get_num_frequencies_nyquist(fn_samples)
@@ -593,6 +621,17 @@ class PartialConvImgEncoder(nn.Module):
         o = self.fc(x.view(x.shape[0], 256, -1)).squeeze(-1)
 
         return o
+
+class GaussianMask(nn.Module):
+    def __init__(self, std, features):
+        super().__init__()
+        self.std = std
+        self.features = features
+        self.coords = nn.parameter.Parameter(torch.linspace(-1,1, features), requires_grad=False)
+        self.scale = 1 / torch.exp(-0.5 * (self.coords.data) / self.std).sum()
+    
+    def forward(self, x):
+        return self.scale * torch.exp(-0.5 * (self.coords - x) / self.std)
 
 
 class Conv2dResBlock(nn.Module):

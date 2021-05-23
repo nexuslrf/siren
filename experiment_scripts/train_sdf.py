@@ -37,6 +37,10 @@ p.add_argument('--point_cloud_path', type=str, default='/home/sitzmann/data/poin
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
 p.add_argument('--split_mlp', action='store_true')
+p.add_argument('--approx_layers', type=int, default=2)
+p.add_argument('--act_scale', type=float, default=1)
+p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
+p.add_argument('--fusion_before_act', action='store_true')
 opt = p.parse_args()
 
 
@@ -45,9 +49,11 @@ dataloader = DataLoader(sdf_dataset, shuffle=True, batch_size=opt.batch_size, pi
 
 # Define the model.
 if opt.model_type == 'nerf':
-    model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp)
+    model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp,
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act)
 else:
-    model = modules.SingleBVPNet(type=opt.model_type, in_features=3, split_mlp=opt.split_mlp)
+    model = modules.SingleBVPNet(type=opt.model_type, in_features=3, split_mlp=opt.split_mlp,
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act)
 model.cuda()
 
 # Define the loss
