@@ -5,6 +5,7 @@ import time
 sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
 
 import dataio, meta_modules, utils, training, loss_functions, modules
+import skimage.io
 import torch
 from torch.utils.data import DataLoader
 import configargparse
@@ -23,7 +24,7 @@ p.add_argument('--lr', type=float, default=1e-4, help='learning rate. default=1e
 p.add_argument('--num_epochs', type=int, default=10000,
                help='Number of epochs to train for.')
 
-p.add_argument('--epochs_til_ckpt', type=int, default=1000,
+p.add_argument('--epochs_til_ckpt', type=int, default=2000,
                help='Time interval in seconds until checkpoint is saved.')
 p.add_argument('--steps_til_summary', type=int, default=1000,
                help='Time interval in seconds until tensorboard summary is saved.')
@@ -41,11 +42,19 @@ p.add_argument('--approx_layers', type=int, default=2)
 p.add_argument('--act_scale', type=float, default=1)
 p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
 p.add_argument('--fusion_before_act', action='store_true')
+p.add_argument('--image_path', type=str, default='')
 opt = p.parse_args()
 
-img_dataset = dataio.Camera()
-coord_dataset = dataio.Implicit2DWrapper(img_dataset, sidelength=512, compute_diff='all')
+sidelength = 512
 image_resolution = (512, 512)
+img_src = None
+if opt.image_path != "":
+    img_src = skimage.io.imread(opt.image_path, as_gray=True)
+    image_resolution = img_src.shape
+    sidelength = img_src.shape
+
+img_dataset = dataio.Camera(img_src=img_src)
+coord_dataset = dataio.Implicit2DWrapper(img_dataset, sidelength=sidelength, compute_diff='all')
 
 dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=0)
 

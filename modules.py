@@ -246,11 +246,20 @@ class SplitFCBlock(MetaModule):
     def forward_channel(self, coord, channel_id):
         h = self.coord_linears[channel_id](coord)
         h = self.coord_nl(h)
-        for i in range(self.approx_layers):
+        for i in range(self.approx_layers-1):
             h = self.net[i](h)
+        # layer before fusion
+        if not self.fusion_before_act:
+            # for simple fusion strategies
+            h = self.net[self.approx_layers-1](h)
+        else:
+            # fusion before activation
+            h = self.net[self.approx_layers-1][0](h)
         return h
     
     def forward_fusion(self, h):
+        if self.approx_layers == self.num_hidden_layers + 1:
+            h = h.sum(-1, keepdim=True)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
             h = self.net[i](h)
         return h

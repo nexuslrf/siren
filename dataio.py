@@ -461,10 +461,12 @@ class Video(Dataset):
 
 
 class Camera(Dataset):
-    def __init__(self, downsample_factor=1):
+    def __init__(self, img_src=None, downsample_factor=1):
         super().__init__()
         self.downsample_factor = downsample_factor
-        self.img = Image.fromarray(skimage.data.camera())
+        if img_src is None:
+            img_src = skimage.data.camera()
+        self.img = Image.fromarray(img_src)
         self.img_channels = 1
 
         if downsample_factor > 1:
@@ -591,10 +593,18 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
         self.dataset = dataset
         self.mgrid = get_mgrid(sidelength)
 
+        self.skip = False
+        self.in_dict, self.gt_dict = None, None
+        if len(self.dataset) == 1:
+            self.in_dict, self.gt_dict = self.__getitem__(0)
+            self.skip = True
+
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
+        if self.skip:
+            return self.in_dict, self.gt_dict
         img = self.transform(self.dataset[idx])
 
         if self.compute_diff == 'gradients':

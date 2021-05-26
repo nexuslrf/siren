@@ -5,9 +5,9 @@
 import sys
 import os
 sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
-
+import time
 import dataio, meta_modules, utils, training, loss_functions, modules
-
+import torch
 from torch.utils.data import DataLoader
 import configargparse
 
@@ -41,6 +41,8 @@ p.add_argument('--approx_layers', type=int, default=2)
 p.add_argument('--act_scale', type=float, default=1)
 p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
 p.add_argument('--fusion_before_act', action='store_true')
+p.add_argument('--speed_test', action='store_true')
+p.add_argument('--test_dim', type=int, default=512)
 opt = p.parse_args()
 
 
@@ -62,7 +64,40 @@ summary_fn = utils.write_sdf_summary
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 
-training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
-               steps_til_summary=opt.steps_til_summary * len(sdf_dataset), epochs_til_checkpoint=opt.epochs_til_ckpt,
-               model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, double_precision=False,
-               clip_grad=True)
+if not opt.speed_test:
+    training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
+                steps_til_summary=opt.steps_til_summary * len(sdf_dataset), epochs_til_checkpoint=opt.epochs_til_ckpt,
+                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, double_precision=False,
+                clip_grad=True)
+
+# # test sdf speed
+else:
+    test_len = 50
+    if not opt.split_mlp:
+        with torch.no_grad():
+            model_input = {'coords': dataio.get_mgrid(opt.test_dim, 3).cuda()}
+            print("test start!")
+            t0 = time.time()
+            for i in range(test_len):
+                model_output = model(model_input)
+                f"{model_output['model_out'][...,0]}"
+            t1 = time.time()
+            print(f"Time consumed: {(t1-t0)/test_len}")
+    else:
+        with torch.no_grad():
+            x = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
+            y = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
+            z = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
+            print("test start!")
+            N = opt.test_dim
+            t0 = time.time()
+            for i in range(test_len):
+                x_feat = model.forward_split_channel(x, 0)
+                y_feat = model.forward_split_channel(y, 1)
+                z_feat = model.forward_split_channel(z, 2)
+                sh = list(x_feat.shape)[1:]
+                fusion_feat = x_feat.reshape([1,1, N] + sh) + y_feat.reshape([1,N,1] + sh) + z_feat.reshape([N,1,1]+sh)
+                model_output = model.forward_split_fusion(x_feat.unsqueeze(1) + y_feat.unsqueeze(0) + z_feat.unsqueeze(0))
+                f"{model_output[...,0]}"
+            t1 = time.time()
+            print(f"Time consumed: {(t1-t0)/test_len}")

@@ -28,6 +28,10 @@ p.add_argument('--mode', type=str, default='mlp',
                help='Options are "mlp" or "nerf"')
 p.add_argument('--resolution', type=int, default=1600)
 p.add_argument('--split_mlp', action='store_true')
+p.add_argument('--approx_layers', type=int, default=2)
+p.add_argument('--act_scale', type=float, default=1)
+p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
+p.add_argument('--fusion_before_act', action='store_true')
 opt = p.parse_args()
 
 
@@ -36,9 +40,11 @@ class SDFDecoder(torch.nn.Module):
         super().__init__()
         # Define the model.
         if opt.model_type == 'nerf':
-            self.model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp)
+            self.model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp, 
+            approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act)
         else:
-            self.model = modules.SingleBVPNet(type=opt.model_type, in_features=3, split_mlp=opt.split_mlp)
+            self.model = modules.SingleBVPNet(type=opt.model_type, in_features=3, split_mlp=opt.split_mlp, 
+            approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act)
         self.model.load_state_dict(torch.load(opt.checkpoint_path))
         self.model.cuda()
 
