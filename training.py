@@ -11,8 +11,8 @@ import os
 import shutil
 from collections import OrderedDict
 
-def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_checkpoint, model_dir, loss_fn,
-          summary_fn, val_dataloader=None, double_precision=False, clip_grad=False, use_lbfgs=False, loss_schedules=None):
+def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_checkpoint, model_dir, loss_fn, summary_fn,
+    val_dataloader=None, double_precision=False, clip_grad=False, use_lbfgs=False, loss_schedules=None, split_train=False):
 
     optim = torch.optim.Adam(lr=lr, params=model.parameters())
 
@@ -52,7 +52,7 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
 
                 train_loss = train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writer, train_losses,
                             total_steps, double_precision, use_lbfgs, steps_til_summary, 
-                            checkpoints_dir, summary_fn, clip_grad)
+                            checkpoints_dir, summary_fn, clip_grad, split_train)
 
                 pbar.update(1)
 
@@ -81,10 +81,10 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
                    np.array(train_losses))
 
 def train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writer, train_losses,
-    total_steps, double_precision, use_lbfgs, steps_til_summary, checkpoints_dir, summary_fn, clip_grad):
+    total_steps, double_precision, use_lbfgs, steps_til_summary, checkpoints_dir, summary_fn, clip_grad, split_train):
 
-    model_input = {key: value.cuda() for key, value in model_input.items()}
-    gt = {key: value.cuda() for key, value in gt.items()}
+    model_input = {key: apply_cuda(value) for key, value in model_input.items()}
+    gt = {key: apply_cuda(value) for key, value in gt.items()}
 
     if double_precision:
         model_input = {key: value.double() for key, value in model_input.items()}
@@ -103,7 +103,7 @@ def train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writ
         optim.step(closure)
 
     # print(model_input['coords'].shape)
-    model_output = model(model_input) #, params=OrderedDict(model.named_parameters()))
+    model_output = model(model_input, split_coord=split_train) #, params=OrderedDict(model.named_parameters()))
     # print(model_output['model_out'].shape)
     losses = loss_fn(model_output, gt)
 
@@ -149,3 +149,9 @@ class LinearDecaySchedule():
 
     def __call__(self, iter):
         return self.start_val + (self.final_val - self.start_val) * min(iter / self.num_steps, 1.)
+
+def apply_cuda(tensor):
+    if isinstance(tensor, torch.Tensor):
+        return tensor.cuda()
+    else:
+        return [t.cuda() for t in tensor]

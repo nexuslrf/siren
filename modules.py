@@ -201,14 +201,25 @@ class SplitFCBlock(MetaModule):
             except:
                 pass
 
-    def forward(self, coords, params=None, pos_codes=None, **kwargs):
-        if params is None:
-            params = OrderedDict(self.named_parameters())
+    def forward(self, coords, params=None, pos_codes=None, split_coord=False, **kwargs):
+        """
+        When split_coord=True, the input coords should be a list a tensor for each coord.
+        the length of each coord tensor do not need to be the same. But the dimension of each coord tensor
+        should be predefined for broadcasting operation.
+        """
+        # TODO no support for passing params.
+        # if params is None:
+        #     params = OrderedDict(self.named_parameters())
+        if split_coord:
+            hs = [self.forward_channel(coord, i, pos_codes) for i, coord in enumerate(coords)]
+            h = self.forward_fusion(hs)
+            sh = h.shape
+            return h.reshape(sh[0], -1, sh[-1])
 
-        channels = torch.split(coords, self.feat_per_channel, dim=-1)
+        hs = torch.split(coords, self.feat_per_channel, dim=-1)
         coord_h = []
-        for i, ch in enumerate(channels):
-            h = self.coord_linears[i](ch)
+        for i, hi in enumerate(hs):
+            h = self.coord_linears[i](hi)
             coord_h.append(h)
         h = torch.stack(coord_h, -2)
         h = self.coord_nl(h)
@@ -221,16 +232,18 @@ class SplitFCBlock(MetaModule):
             # for simple fusion strategies
             h = self.net[self.approx_layers-1](h)
             if pos_codes is not None:
-                # h = (h * pos_codes).sum(-2)
-                h = (h + pos_codes).prod(-2)
-
-            elif self.fusion_operator == 'sum':
+                # h = (h * pos_codes)
+                h = (h + pos_codes)
+            if self.fusion_operator == 'sum':
                 h = h.sum(-2)
             elif self.fusion_operator == 'prod':
                 h = h.prod(-2)
         else:
             # fusion before activation
             h = self.net[self.approx_layers-1][0](h)
+            if pos_codes is not None:
+                # h = (h * pos_codes)
+                h = (h + pos_codes)
             if self.fusion_operator == 'sum':
                 h = h.sum(-2)
             elif self.fusion_operator == 'prod':
@@ -243,7 +256,7 @@ class SplitFCBlock(MetaModule):
             h = self.net[i](h)
         return h
     
-    def forward_channel(self, coord, channel_id):
+    def forward_channel(self, coord, channel_id, pos_codes=None):
         h = self.coord_linears[channel_id](coord)
         h = self.coord_nl(h)
         for i in range(self.approx_layers-1):
@@ -255,9 +268,28 @@ class SplitFCBlock(MetaModule):
         else:
             # fusion before activation
             h = self.net[self.approx_layers-1][0](h)
+        if pos_codes is not None:
+            # h = (h * pos_codes)
+            h = (h + pos_codes)
         return h
     
-    def forward_fusion(self, h):
+    def forward_fusion(self, hs):
+        '''
+        When do the fusion, it will expand the list of coord into a grid. 
+        In this case, data dimension needs to be predefine. E.g.,
+            X: [1,128,1], Y: [64,1,1] --> [64,128,1]
+        '''
+        if not isinstance(hs, torch.Tensor):
+            h = hs[0]
+            for hi in hs[1:]:
+                if self.fusion_operator == 'sum':
+                    h = h + hi
+                elif self.fusion_operator == 'prod':
+                    h = h * hi
+        else:
+            h = hs
+        if self.fusion_before_act:
+            h = self.net[self.approx_layers-1][1](h)
         if self.approx_layers == self.num_hidden_layers + 1:
             h = h.sum(-1, keepdim=True)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
@@ -318,31 +350,43 @@ class SingleBVPNet(MetaModule):
                                )
         print(self)
 
-    def forward(self, model_input, params=None):
+    def forward(self, model_input, params=None, split_coord=False):
+        '''
+        if split_coord is True, then model_input should be a list of tensors for each coord
+        '''
         if params is None:
             params = OrderedDict(self.named_parameters())
 
         # Enables us to compute gradients w.r.t. coordinates
-        coords_org = model_input['coords'].clone().detach().requires_grad_(True)
-        coords = coords_org
+        if not split_coord:
+            coords_org = model_input['coords'].clone().detach().requires_grad_(True)
+            coords = coords_org
 
-        # various input processing methods for different applications
-        if self.image_downsampling.downsample:
-            coords = self.image_downsampling(coords)
-        if self.mode == 'rbf':
-            coords = self.rbf_layer(coords)
-        elif self.mode == 'nerf':
-            coords = self.positional_encoding(coords)
-        
-        if self.pos_enc:
-            coord_dim = coords.shape[-1]
-            pos_codes = self.pos_encoder(coords.unsqueeze(-1))
-            pos_codes = pos_codes.reshape(pos_codes.shape[0], -1, coord_dim, pos_codes.shape[-1])
-                # pos_codes = pos_codes.sum(-2, keepdim=True) - pos_codes
-            output = self.net(coords, get_subdict(params, self.module_prefix + 'net'), pos_codes=pos_codes)
+            # various input processing methods for different applications
+            if self.image_downsampling.downsample:
+                coords = self.image_downsampling(coords)
+            if self.mode == 'rbf':
+                coords = self.rbf_layer(coords)
+            elif self.mode == 'nerf':
+                coords = self.positional_encoding(coords)
+
+            if self.pos_enc:
+                coord_dim = coords.shape[-1]
+                pos_codes = self.pos_encoder(coords.unsqueeze(-1))
+                pos_codes = pos_codes.reshape(pos_codes.shape[0], -1, coord_dim, pos_codes.shape[-1])
+                    # pos_codes = pos_codes.sum(-2, keepdim=True) - pos_codes
+                output = self.net(coords, get_subdict(params, self.module_prefix + 'net'), pos_codes=pos_codes)
+            else:
+                output = self.net(coords, get_subdict(params, self.module_prefix + 'net'))
         else:
-            output = self.net(coords, get_subdict(params, self.module_prefix + 'net'))
+            coords_org = [coord.clone().detach().requires_grad_(True) for coord in model_input['coords']]
+            coords = coords_org
+            if self.mode == 'nerf':
+                coords = [self.positional_encoding(coord, single_channel=True) for coord in coords]
+            output = self.net(coords, split_coord=True)
+            
         return {'model_in': coords_org, 'model_out': output}
+
 
     def forward_with_activations(self, model_input):
         '''Returns not only model output, but also intermediate activations.'''
@@ -353,11 +397,8 @@ class SingleBVPNet(MetaModule):
     def forward_split_channel(self, coord, channel_id):
         if not self.split_mlp:
             return None
-        if self.image_downsampling.downsample:
-            coord = self.image_downsampling(coord)
-        if self.mode == 'rbf':
-            coord = self.rbf_layer(coord)
-        elif self.mode == 'nerf':
+        # TODO so far only support nerf p.e. for split_coord.
+        if self.mode == 'nerf':
             coord = self.positional_encoding(coord, single_channel=True)
         channel_feat = self.net.forward_channel(coord, channel_id)
         return channel_feat
@@ -453,8 +494,8 @@ class PosEncodingNeRF(nn.Module):
 
     def forward(self, coords, single_channel=False):
         if single_channel:
-            in_features = 1
-            out_dim = self.out_dim // self.in_features
+            in_features = coords.shape[-1]
+            out_dim = self.out_dim // self.in_features * in_features
         else:
             in_features = self.in_features
             out_dim = self.out_dim

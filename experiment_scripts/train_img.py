@@ -36,6 +36,7 @@ p.add_argument('--model_type', type=str, default='sine',
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
 p.add_argument('--split_mlp', action='store_true')
+p.add_argument('--split_train', action='store_true')
 p.add_argument('--speed_test', action='store_true')
 p.add_argument('--test_dim', type=int, default=512)
 p.add_argument('--approx_layers', type=int, default=2)
@@ -44,6 +45,9 @@ p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='
 p.add_argument('--fusion_before_act', action='store_true')
 p.add_argument('--image_path', type=str, default='')
 opt = p.parse_args()
+
+if opt.split_train:
+    assert opt.split_mlp == True
 
 sidelength = 512
 image_resolution = (512, 512)
@@ -54,7 +58,7 @@ if opt.image_path != "":
     sidelength = img_src.shape
 
 img_dataset = dataio.Camera(img_src=img_src)
-coord_dataset = dataio.Implicit2DWrapper(img_dataset, sidelength=sidelength, compute_diff='all')
+coord_dataset = dataio.Implicit2DWrapper(img_dataset, sidelength=sidelength, compute_diff='all', split_coord=opt.split_train)
 
 dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=0)
 
@@ -79,7 +83,7 @@ summary_fn = partial(utils.write_image_summary, image_resolution)
 if not opt.speed_test:
     training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
                 steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
-                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn)
+                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, split_train=opt.split_train)
 # # test image
 else:
     test_len = 50
