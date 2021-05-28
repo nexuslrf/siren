@@ -39,8 +39,14 @@ def divergence(y, x):
 def gradient(y, x, grad_outputs=None):
     if grad_outputs is None:
         grad_outputs = torch.ones_like(y)
-    grad = torch.autograd.grad(y, [x], grad_outputs=grad_outputs, create_graph=True)[0]
-    return grad
+    xs = [x] if isinstance(x, torch.Tensor) else x
+    grads = torch.autograd.grad(y, x, grad_outputs=grad_outputs, create_graph=True)
+    if len(x) == 1:
+        return grads[0]
+    else:
+        grads = torch.cat(torch.broadcast_tensors(*grads), -1)
+        sh = grads.shape
+        return grads.reshape(sh[0], -1, sh[-1])
 
 
 def jacobian(y, x):
