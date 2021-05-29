@@ -126,6 +126,11 @@ def train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writ
                     os.path.join(checkpoints_dir, 'model_current.pth'))
         # with torch.no_grad():
         #     model_output = model({'coords': model_input['coords'] * 0.6 + 0.2})
+        if split_train:
+            mgrid = torch.cat(torch.broadcast_tensors(*model_input['coords']), -1)
+            grid_sh = mgrid.shape
+            model_input = {'coords': mgrid.reshape(grid_sh[0], -1, grid_sh[-1])}
+            model_output = model(model_input)
         summary_fn(model, model_input, gt, model_output, writer, total_steps)
 
     if not use_lbfgs:
