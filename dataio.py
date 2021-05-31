@@ -42,6 +42,14 @@ def get_mgrid(sidelen, dim=2):
     pixel_coords = torch.Tensor(pixel_coords).view(-1, dim)
     return pixel_coords
 
+def get_split_shape(shape, dim, n_dim):
+    """shape is 2-d array"""
+    n_sample = shape[0]
+    sample_dim = shape[1]
+    sh = [1] * n_dim + [sample_dim]
+    sh[dim] = n_sample
+    return sh
+
 
 def lin2img(tensor, image_resolution=None):
     batch_size, num_samples, channels = tensor.shape
@@ -391,15 +399,17 @@ class WaveSource(Dataset):
 
 
 class PointCloud(Dataset):
-    def __init__(self, pointcloud_path, on_surface_points, keep_aspect_ratio=True):
+    def __init__(self, pointcloud_path, on_surface_points, keep_aspect_ratio=True, 
+        split_coord=False, samples_per_coord=None):
+
         super().__init__()
 
         print("Loading point cloud")
         point_cloud = np.genfromtxt(pointcloud_path)
         print("Finished loading point cloud")
-
         coords = point_cloud[:, :3]
         self.normals = point_cloud[:, 3:]
+        self.split_coord = split_coord
 
         # Reshape point cloud such that it lies in bounding box of (-1, 1) (distorts geometry, but makes for high
         # sample efficiency)
@@ -417,13 +427,17 @@ class PointCloud(Dataset):
 
         self.on_surface_points = on_surface_points
 
+        if self.split_coord:
+            self.samples_per_coord = [2 ** int(np.ceil(np.log2(np.cbrt(on_surface_points))))] * 3 \
+                if samples_per_coord is None else samples_per_coord
+
     def __len__(self):
         return self.coords.shape[0] // self.on_surface_points
 
     def __getitem__(self, idx):
         point_cloud_size = self.coords.shape[0]
 
-        off_surface_samples = self.on_surface_points  # **2
+        off_surface_samples = self.on_surface_points if not self.split_coord else np.prod(self.samples_per_coord)
         total_samples = self.on_surface_points + off_surface_samples
 
         # Random coords
@@ -432,17 +446,23 @@ class PointCloud(Dataset):
         on_surface_coords = self.coords[rand_idcs, :]
         on_surface_normals = self.normals[rand_idcs, :]
 
-        off_surface_coords = np.random.uniform(-1, 1, size=(off_surface_samples, 3))
-        off_surface_normals = np.ones((off_surface_samples, 3)) * -1
-
         sdf = np.zeros((total_samples, 1))  # on-surface = 0
         sdf[self.on_surface_points:, :] = -1  # off-surface = -1
-
-        coords = np.concatenate((on_surface_coords, off_surface_coords), axis=0)
+        off_surface_normals = np.ones((off_surface_samples, 3)) * -1
         normals = np.concatenate((on_surface_normals, off_surface_normals), axis=0)
 
-        return {'coords': torch.from_numpy(coords).float()}, {'sdf': torch.from_numpy(sdf).float(),
-                                                              'normals': torch.from_numpy(normals).float()}
+        if not self.split_coord:
+            off_surface_coords = np.random.uniform(-1, 1, size=(off_surface_samples, 3))
+            coords = np.concatenate((on_surface_coords, off_surface_coords), axis=0)
+            coords_split = None
+        else:
+            off_surface_coords = [np.random.uniform(-1, 1, size=get_split_shape((dim, 1), i, 3)) 
+                                        for i, dim in enumerate(self.samples_per_coord)]
+            coords = on_surface_coords
+            coords_split = [torch.from_numpy(coord).float() for coord in off_surface_coords]
+
+        return {'coords': torch.from_numpy(coords).float(), 'coords_split': coords_split}, \
+                {'sdf': torch.from_numpy(sdf).float(), 'normals': torch.from_numpy(normals).float()}
 
 
 class Video(Dataset):
@@ -599,7 +619,7 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
             self.mgrid = get_mgrid(sidelength)
         else:
             n_dim = 2
-            self.mgrid = [get_mgrid(sidelength[i], dim=1).unsqueeze(n_dim-i-1) 
+            self.mgrid = [get_mgrid(sidelength[i], dim=1).reshape(get_split_shape((sidelength[i],1),i,n_dim))
                             for i in range(n_dim)]
 
         self.skip = False
@@ -630,7 +650,8 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
 
         img = img.permute(1, 2, 0).view(-1, self.dataset.img_channels)
 
-        in_dict = {'idx': idx, 'coords': self.mgrid}
+        coords_key = 'coords' if not self.split_coord else 'coords_split'
+        in_dict = {'idx': idx, coords_key: self.mgrid}
         gt_dict = {'img': img}
 
         if self.compute_diff == 'gradients':

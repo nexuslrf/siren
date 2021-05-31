@@ -40,7 +40,7 @@ def gradient(y, x, grad_outputs=None):
     if grad_outputs is None:
         grad_outputs = torch.ones_like(y)
     xs = [x] if isinstance(x, torch.Tensor) else x
-    grads = torch.autograd.grad(y, x, grad_outputs=grad_outputs, create_graph=True)
+    grads = torch.autograd.grad(y, xs, grad_outputs=grad_outputs, create_graph=True)
     if len(x) == 1:
         return grads[0]
     else:

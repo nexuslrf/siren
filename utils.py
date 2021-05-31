@@ -328,6 +328,12 @@ def write_video_summary(vid_dataset, model, model_input, gt, model_output, write
 
 def write_image_summary(image_resolution, model, model_input, gt,
                         model_output, writer, total_steps, prefix='train_'):
+
+    if 'coords_split' in model_input:
+        mgrid = torch.cat(torch.broadcast_tensors(*model_input['coords']), -1)
+        grid_sh = mgrid.shape
+        model_input = {'coords': mgrid.reshape(grid_sh[0], -1, grid_sh[-1])}
+        model_output = model(model_input)
     gt_img = dataio.lin2img(gt['img'], image_resolution)
     pred_img = dataio.lin2img(model_output['model_out'], image_resolution)
     img_gradient = diff_operators.gradient(model_output['model_out'], model_output['model_in'])

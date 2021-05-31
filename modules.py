@@ -350,15 +350,15 @@ class SingleBVPNet(MetaModule):
                                )
         print(self)
 
-    def forward(self, model_input, params=None, split_coord=False):
+    def forward(self, model_input, params=None):
         '''
-        if split_coord is True, then model_input should be a list of tensors for each coord
+        if coords_split in model_input, then model_input['coords_split'] should be a list of tensors for each coord
         '''
         if params is None:
             params = OrderedDict(self.named_parameters())
 
         # Enables us to compute gradients w.r.t. coordinates
-        if not split_coord:
+        if 'coords' in model_input and model_input['coords']:
             coords_org = model_input['coords'].clone().detach().requires_grad_(True)
             coords = coords_org
 
@@ -378,8 +378,8 @@ class SingleBVPNet(MetaModule):
                 output = self.net(coords, get_subdict(params, self.module_prefix + 'net'), pos_codes=pos_codes)
             else:
                 output = self.net(coords, get_subdict(params, self.module_prefix + 'net'))
-        else:
-            coords_org = [coord.clone().detach().requires_grad_(True) for coord in model_input['coords']]
+        if 'coords_split' in model_input and model_input['coords_split']:
+            coords_org = [coord.clone().detach().requires_grad_(True) for coord in model_input['coords_split']]
             coords = coords_org
             if self.mode == 'nerf':
                 coords = [self.positional_encoding(coord, single_channel=True) for coord in coords]

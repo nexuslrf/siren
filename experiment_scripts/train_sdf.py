@@ -42,6 +42,7 @@ p.add_argument('--act_scale', type=float, default=1)
 p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
 p.add_argument('--fusion_before_act', action='store_true')
 p.add_argument('--speed_test', action='store_true')
+p.add_argument('--split_train', action='store_true')
 p.add_argument('--test_dim', type=int, default=512)
 opt = p.parse_args()
 
@@ -68,7 +69,7 @@ if not opt.speed_test:
     training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
                 steps_til_summary=opt.steps_til_summary * len(sdf_dataset), epochs_til_checkpoint=opt.epochs_til_ckpt,
                 model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, double_precision=False,
-                clip_grad=True)
+                clip_grad=True, split_train=opt.split_train)
 
 # # test sdf speed
 else:
