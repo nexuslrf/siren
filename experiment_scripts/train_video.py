@@ -36,7 +36,7 @@ p.add_argument('--dataset', type=str, default='bikes',
 p.add_argument('--model_type', type=str, default='sine',
                help='Options currently are "sine" (all sine activations), "relu" (all relu activations,'
                     '"nerf" (relu activations and positional encoding as in NeRF), "rbf" (input rbf layer, rest relu)')
-p.add_argument('--sample_frac', type=float, default=35e-4,
+p.add_argument('--sample_frac', type=float, default=18e-4,
                help='What fraction of video pixels to sample in each batch (default is all)')
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
@@ -73,7 +73,7 @@ else:
 # model.module_prefix  = "module."
 # model.net.module_prefix = "module."
 # model = torch.nn.parallel.DataParallel(model)
-# model.load_state_dict(torch.load(opt.checkpoint_path))
+model.load_state_dict(torch.load(opt.checkpoint_path))
 model.cuda()
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
