@@ -761,20 +761,22 @@ class Implicit3DWrapper(torch.utils.data.Dataset):
         self.batch_size = batch_size
         self.split_coord = split_coord
 
+        data = (torch.from_numpy(self.dataset[0]) - 0.5) / 0.5
+        self.data = data.view(-1, self.dataset.channels)
+        self.sample_fraction = sample_fraction
+
         if split_coord:
-            self.mgrid_xy = get_mgrid((sidelength[1], sidelength[2]), dim=2)
-            self.mgrid_z = get_mgrid(sidelength[0], dim=1)
-            data = (torch.from_numpy(self.dataset[0]) - 0.5) / 0.5
-            self.data = data.view(sidelength[0], -1, self.dataset.channels)
+            self.mgrid_xy = get_mgrid((sidelength[1], sidelength[2]), dim=2).unsqueeze(0)
+            self.mgrid_z = get_mgrid(sidelength[0], dim=1).unsqueeze(1)
+            self.n_z = sidelength[0]
+            self.n_xy = sidelength[1] * sidelength[2]
             self.frame_sample_fraction = frame_sample_fraction
             self.pixel_sample_fraction = pixel_sample_fraction
-            self.N_samples = int(self.frame_sample_fraction * self.mgrid_z.shape[0])
-            self.img_samples = int(self.pixel_sample_fraction * self.mgrid_xy.shape[0])
+            self.frame_samples = int(self.frame_sample_fraction * self.n_z)
+            self.img_samples = int(self.pixel_sample_fraction * self.n_xy)
+            self.N_samples = self.n_z * self.n_xy * self.sample_fraction
         else:
             self.mgrid = get_mgrid(sidelength, dim=3)
-            data = (torch.from_numpy(self.dataset[0]) - 0.5) / 0.5
-            self.data = data.view(-1, self.dataset.channels)
-            self.sample_fraction = sample_fraction
             self.N_samples = int(self.sample_fraction * self.mgrid.shape[0])
 
     def __len__(self):
@@ -782,12 +784,15 @@ class Implicit3DWrapper(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         if self.split_coord:
-            coord_idx = torch.randint(0, self.mgrid_z.shape[0], (self.N_samples,))
-            coord_idy = torch.randint(0, self.mgrid_xy.shape[0], (self.img_samples,))
-            data = self.data[coord_idx, :, :]
-            data = data[:, coord_idy, :].view(-1, self.dataset.channels)
-            coords_xy = self.mgrid_xy[coord_idy, :]
-            coords_z = self.mgrid_z[coord_idx, :]
+            z_num = np.random.randint(int(self.n_z*0.1), int(self.n_z*0.9))
+            coord_idx = torch.randperm(self.n_z)[:z_num]
+            coord_idy = torch.randint(0, self.n_xy, (int(self.N_samples/z_num),))
+            # coord_idx = torch.randint(0, self.n_z, (self.frame_samples,))
+            # coord_idy = torch.randint(0, self.n_xy, (self.img_samples,))
+            coord_id = (coord_idx[:,None] * self.n_xy + coord_idy[None, :]).reshape(-1)
+            data = self.data[coord_id, :]
+            coords_xy = self.mgrid_xy[:, coord_idy, :]
+            coords_z = self.mgrid_z[coord_idx, :, :]
             in_dict = {'idx': idx, 'coords_split': [coords_z, coords_xy]}
             gt_dict = {'img': data}
         else:

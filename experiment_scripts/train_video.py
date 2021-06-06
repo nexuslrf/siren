@@ -29,14 +29,14 @@ p.add_argument('--num_epochs', type=int, default=100000,
 
 p.add_argument('--epochs_til_ckpt', type=int, default=1000,
                help='Time interval in seconds until checkpoint is saved.')
-p.add_argument('--steps_til_summary', type=int, default=100,
+p.add_argument('--steps_til_summary', type=int, default=200,
                help='Time interval in seconds until tensorboard summary is saved.')
 p.add_argument('--dataset', type=str, default='bikes',
                help='Video dataset; one of (cat, bikes)', choices=['cat', 'bikes'])
 p.add_argument('--model_type', type=str, default='sine',
                help='Options currently are "sine" (all sine activations), "relu" (all relu activations,'
                     '"nerf" (relu activations and positional encoding as in NeRF), "rbf" (input rbf layer, rest relu)')
-p.add_argument('--sample_frac', type=float, default=18e-4,
+p.add_argument('--sample_frac', type=float, default=18e-4, # 38e-4 is the default value if split_train is not set.
                help='What fraction of video pixels to sample in each batch (default is all)')
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
@@ -44,6 +44,7 @@ p.add_argument('--split_mlp', action='store_true')
 p.add_argument('--st_split', action='store_true')
 p.add_argument('--test_dim', type=int, default=512)
 p.add_argument('--speed_test', action='store_true')
+p.add_argument('--split_train', action='store_true')
 opt = p.parse_args()
 
 if opt.dataset == 'cat':
@@ -52,8 +53,8 @@ elif opt.dataset == 'bikes':
     video_path = skvideo.datasets.bikes()
 
 vid_dataset = dataio.Video(video_path)
-coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, split_coord=True, sample_fraction=opt.sample_frac, frame_sample_fraction=0.608, pixel_sample_fraction=0.00625, batch_size=opt.batch_size)
-dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=2)
+coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, split_coord=opt.split_train, sample_fraction=opt.sample_frac, frame_sample_fraction=0.608, pixel_sample_fraction=0.00625, batch_size=opt.batch_size)
+dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=4)
 
 if opt.st_split:
     split_rule = [1,2]
@@ -73,7 +74,7 @@ else:
 # model.module_prefix  = "module."
 # model.net.module_prefix = "module."
 # model = torch.nn.parallel.DataParallel(model)
-model.load_state_dict(torch.load(opt.checkpoint_path))
+# model.load_state_dict(torch.load(opt.checkpoint_path))
 model.cuda()
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)

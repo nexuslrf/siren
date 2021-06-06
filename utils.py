@@ -321,8 +321,8 @@ def write_video_summary(vid_dataset, model, model_input, gt, model_output, write
     output_vs_gt = torch.cat((gt_vid, pred_vid), dim=-2)
     writer.add_image(prefix + 'output_vs_gt', make_grid(output_vs_gt, scale_each=False, normalize=True),
                      global_step=total_steps)
-    min_max_summary(prefix + 'coords', model_input['coords'], writer, total_steps)
-    min_max_summary(prefix + 'pred_vid', pred_vid, writer, total_steps)
+    # min_max_summary(prefix + 'coords', model_input['coords'], writer, total_steps)
+    # min_max_summary(prefix + 'pred_vid', pred_vid, writer, total_steps)
     writer.add_scalar(prefix + "psnr", psnr, total_steps)
 
 

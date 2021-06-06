@@ -500,7 +500,7 @@ class PosEncodingNeRF(nn.Module):
             in_features = self.in_features
             out_dim = self.out_dim
 
-        coords = coords.view(coords.shape[0], -1, in_features)
+        # coords = coords.view(coords.shape[0], -1, in_features)
         coords_pos_enc = coords.unsqueeze(-2) * \
             self.freq_bands.reshape([1]*(len(coords.shape)-1) + [-1, 1])
         sin = torch.sin(coords_pos_enc)
@@ -522,7 +522,7 @@ class PosEncodingNeRF(nn.Module):
 
         #         coords_pos_enc = torch.cat((coords_pos_enc, sin, cos), axis=-1)
 
-        return coords_pos_enc.reshape(coords.shape[0], -1, out_dim)
+        return coords_pos_enc #.reshape(coords.shape[0], -1, out_dim)
 
 
 class RBFLayer(nn.Module):
