@@ -454,15 +454,15 @@ class PointCloud(Dataset):
         if not self.split_coord:
             off_surface_coords = np.random.uniform(-1, 1, size=(off_surface_samples, 3))
             coords = np.concatenate((on_surface_coords, off_surface_coords), axis=0)
-            coords_split = None
+            in_dict = {'coords': torch.from_numpy(coords).float()}
         else:
             off_surface_coords = [np.random.uniform(-1, 1, size=get_split_shape((dim, 1), i, 3)) 
                                         for i, dim in enumerate(self.samples_per_coord)]
             coords = on_surface_coords
             coords_split = [torch.from_numpy(coord).float() for coord in off_surface_coords]
+            in_dict = {'coords': torch.from_numpy(coords).float(), 'coords_split': coords_split}
 
-        return {'coords': torch.from_numpy(coords).float(), 'coords_split': coords_split}, \
-                {'sdf': torch.from_numpy(sdf).float(), 'normals': torch.from_numpy(normals).float()}
+        return in_dict, {'sdf': torch.from_numpy(sdf).float(), 'normals': torch.from_numpy(normals).float()}
 
 
 class Video(Dataset):

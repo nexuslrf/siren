@@ -358,7 +358,7 @@ class SingleBVPNet(MetaModule):
             params = OrderedDict(self.named_parameters())
 
         # Enables us to compute gradients w.r.t. coordinates
-        if 'coords' in model_input and model_input['coords']:
+        if 'coords' in model_input:
             coords_org = model_input['coords'].clone().detach().requires_grad_(True)
             coords = coords_org
 
@@ -378,7 +378,7 @@ class SingleBVPNet(MetaModule):
                 output = self.net(coords, get_subdict(params, self.module_prefix + 'net'), pos_codes=pos_codes)
             else:
                 output = self.net(coords, get_subdict(params, self.module_prefix + 'net'))
-        if 'coords_split' in model_input and model_input['coords_split']:
+        if 'coords_split' in model_input:
             coords_org = [coord.clone().detach().requires_grad_(True) for coord in model_input['coords_split']]
             coords = coords_org
             if self.mode == 'nerf':
