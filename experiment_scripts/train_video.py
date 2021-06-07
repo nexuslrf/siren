@@ -45,6 +45,7 @@ p.add_argument('--st_split', action='store_true')
 p.add_argument('--test_dim', type=int, default=512)
 p.add_argument('--speed_test', action='store_true')
 p.add_argument('--split_train', action='store_true')
+p.add_argument('-j', '--workers', default=4, type=int, help='number of data loading workers (default: 4)')
 opt = p.parse_args()
 
 if opt.dataset == 'cat':
@@ -54,7 +55,7 @@ elif opt.dataset == 'bikes':
 
 vid_dataset = dataio.Video(video_path)
 coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, split_coord=opt.split_train, sample_fraction=opt.sample_frac, frame_sample_fraction=0.608, pixel_sample_fraction=0.00625, batch_size=opt.batch_size)
-dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=4)
+dataloader = DataLoader(coord_dataset, shuffle=False, batch_size=1, pin_memory=True, num_workers=opt.workers)
 
 if opt.st_split:
     split_rule = [1,2]

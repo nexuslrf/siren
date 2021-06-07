@@ -38,16 +38,18 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
     writer = SummaryWriter(summaries_dir)
 
     total_steps = 0
-    with tqdm(total=len(train_dataloader) * epochs) as pbar:
+    with tqdm(total=epochs) as pbar:
         train_losses = []
-        for epoch in range(epochs):
-            if not epoch % epochs_til_checkpoint and epoch:
-                torch.save(model.state_dict(),
-                           os.path.join(checkpoints_dir, 'model_epoch_%04d.pth' % epoch))
-                np.savetxt(os.path.join(checkpoints_dir, 'train_losses_epoch_%04d.txt' % epoch),
-                           np.array(train_losses))
+        # for epoch in range(epochs):
+        while total_steps < epochs:
 
             for step, (model_input, gt) in enumerate(train_dataloader):
+                if not total_steps % epochs_til_checkpoint and total_steps:
+                    torch.save(model.state_dict(),
+                            os.path.join(checkpoints_dir, 'model_epoch_%04d.pth' % total_steps))
+                    np.savetxt(os.path.join(checkpoints_dir, 'train_losses_epoch_%04d.txt' % total_steps),
+                            np.array(train_losses))
+
                 start_time = time.time()
 
                 train_loss = train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writer, train_losses,
@@ -57,7 +59,7 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
                 pbar.update(1)
 
                 if not total_steps % steps_til_summary:
-                    tqdm.write("Epoch %d, Total loss %0.6f, iteration time %0.6f" % (epoch, train_loss, time.time() - start_time))
+                    tqdm.write("Epoch %d, Total loss %0.6f, iteration time %0.6f" % (total_steps, train_loss, time.time() - start_time))
 
                     if val_dataloader is not None:
                         print("Running validation set...")
