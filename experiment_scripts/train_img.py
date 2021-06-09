@@ -44,6 +44,7 @@ p.add_argument('--act_scale', type=float, default=1)
 p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
 p.add_argument('--fusion_before_act', action='store_true')
 p.add_argument('--image_path', type=str, default='')
+p.add_argument('--use_atten', action='store_true')
 opt = p.parse_args()
 
 if opt.split_train:
@@ -53,11 +54,14 @@ sidelength = 512
 image_resolution = (512, 512)
 img_src = None
 if opt.image_path != "":
-    img_src = skimage.io.imread(opt.image_path, as_gray=True)
-    image_resolution = img_src.shape
-    sidelength = img_src.shape
-
-img_dataset = dataio.Camera(img_src=img_src)
+    img_dataset = dataio.ImageFile(opt.image_path)
+    image_resolution = img_dataset.img.size
+    sidelength = img_dataset.img.size
+else:
+    # img_src = skimage.io.imread(opt.image_path, as_gray=True)
+    # image_resolution = img_src.shape
+    # sidelength = img_src.shape
+    img_dataset = dataio.Camera(img_src=img_src)
 coord_dataset = dataio.Implicit2DWrapper(img_dataset, sidelength=sidelength, compute_diff='all', split_coord=opt.split_train)
 
 dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=0)
@@ -65,11 +69,11 @@ dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, 
 # Define the model.
 if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'tanh' or opt.model_type == 'selu' or opt.model_type == 'elu'\
         or opt.model_type == 'softplus':
-    model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', sidelength=image_resolution, split_mlp=opt.split_mlp, 
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act)
+    model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', out_features=img_dataset.img_channels, sidelength=image_resolution, split_mlp=opt.split_mlp, 
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
-    model = modules.SingleBVPNet(type='relu', mode=opt.model_type, sidelength=image_resolution, split_mlp=opt.split_mlp,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act)
+    model = modules.SingleBVPNet(type='relu', mode=opt.model_type, out_features=img_dataset.img_channels, sidelength=image_resolution, split_mlp=opt.split_mlp,
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
 else:
     raise NotImplementedError
 model.cuda()

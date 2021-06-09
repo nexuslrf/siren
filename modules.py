@@ -128,7 +128,7 @@ class SplitFCBlock(MetaModule):
 
     def __init__(self, in_features, out_features, num_hidden_layers, hidden_features,
                  outermost_linear=False, nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2, 
-                 split_rule=None, fusion_operator='sum', act_scale=1, fusion_before_act=False):
+                 split_rule=None, fusion_operator='sum', act_scale=1, fusion_before_act=False, use_atten=False):
         super().__init__()
 
         self.first_layer_init = None
@@ -145,6 +145,7 @@ class SplitFCBlock(MetaModule):
         self.fusion_operator = fusion_operator
         self.fusion_before_act = fusion_before_act
         self.out_features = out_features
+        self.use_atten = use_atten
         last_layer_features = hidden_features \
             if approx_layers == num_hidden_layers + 1 else out_features
 
@@ -200,6 +201,9 @@ class SplitFCBlock(MetaModule):
                 self.net[i][1].split_scale = split_scale
             except:
                 pass
+        if use_atten:
+            self.atten = BatchLinear(in_features, hidden_features)
+            self.atten.apply(self.weight_init)
 
     def forward(self, coords, params=None, pos_codes=None, split_coord=False, **kwargs):
         """
@@ -250,6 +254,8 @@ class SplitFCBlock(MetaModule):
                 h = h.prod(-2)
             h = self.net[self.approx_layers-1][1](h)
 
+        if self.atten:
+            h = h * self.atten(coords)
         if self.approx_layers == self.num_hidden_layers + 1:
             h = h.sum(-1, keepdim=True)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
@@ -347,6 +353,7 @@ class SingleBVPNet(MetaModule):
                                act_scale=kwargs.get("act_scale", 1),
                                fusion_operator=kwargs.get("fusion_operator", 'prod'),
                                fusion_before_act=kwargs.get("fusion_before_act", False),
+                               use_atten=kwargs.get("use_atten", False)
                                )
         print(self)
 

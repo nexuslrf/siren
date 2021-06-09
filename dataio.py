@@ -638,15 +638,15 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
 
         if self.compute_diff == 'gradients':
             img *= 1e1
-            gradx = scipy.ndimage.sobel(img.numpy(), axis=1).squeeze(0)[..., None]
-            grady = scipy.ndimage.sobel(img.numpy(), axis=2).squeeze(0)[..., None]
+            gradx = scipy.ndimage.sobel(img.numpy(), axis=1).transpose(1,2,0)
+            grady = scipy.ndimage.sobel(img.numpy(), axis=2).transpose(1,2,0)
         elif self.compute_diff == 'laplacian':
             img *= 1e4
-            laplace = scipy.ndimage.laplace(img.numpy()).squeeze(0)[..., None]
+            laplace = scipy.ndimage.laplace(img.numpy()).transpose(1,2,0)
         elif self.compute_diff == 'all':
-            gradx = scipy.ndimage.sobel(img.numpy(), axis=1).squeeze(0)[..., None]
-            grady = scipy.ndimage.sobel(img.numpy(), axis=2).squeeze(0)[..., None]
-            laplace = scipy.ndimage.laplace(img.numpy()).squeeze(0)[..., None]
+            gradx = scipy.ndimage.sobel(img.numpy(), axis=1).transpose(1,2,0)
+            grady = scipy.ndimage.sobel(img.numpy(), axis=2).transpose(1,2,0)
+            laplace = scipy.ndimage.laplace(img.numpy()).transpose(1,2,0)
 
         img = img.permute(1, 2, 0).view(-1, self.dataset.img_channels)
 
@@ -664,11 +664,11 @@ class Implicit2DWrapper(torch.utils.data.Dataset):
             gt_dict.update({'laplace': torch.from_numpy(laplace).view(-1, 1)})
 
         elif self.compute_diff == 'all':
-            gradients = torch.cat((torch.from_numpy(gradx).reshape(-1, 1),
-                                   torch.from_numpy(grady).reshape(-1, 1)),
+            gradients = torch.cat((torch.from_numpy(gradx).reshape(-1, gradx.shape[-1]),
+                                   torch.from_numpy(grady).reshape(-1, gradx.shape[-1])),
                                   dim=-1)
             gt_dict.update({'gradients': gradients})
-            gt_dict.update({'laplace': torch.from_numpy(laplace).view(-1, 1)})
+            gt_dict.update({'laplace': torch.from_numpy(laplace).view(-1, laplace.shape[-1])})
 
         return in_dict, gt_dict
 
