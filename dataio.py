@@ -15,6 +15,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
+import trimesh
 
 
 def get_mgrid(sidelen, dim=2):
@@ -463,6 +464,50 @@ class PointCloud(Dataset):
             in_dict = {'coords': torch.from_numpy(coords).float(), 'coords_split': coords_split}
 
         return in_dict, {'sdf': torch.from_numpy(sdf).float(), 'normals': torch.from_numpy(normals).float()}
+
+
+class Mesh(Dataset):
+    def __init__(self, mesh_path, ):
+        super().__init__()
+        mesh = trimesh.load(mesh_path)
+        """
+        Convert a possible scene to a mesh. If conversion occurs, 
+            the returned mesh has only vertex and face data.
+        """
+        if isinstance(mesh, trimesh.Scene):
+            if len(mesh.geometry) == 0:
+                mesh = None  # empty scene
+            else:
+                # we lose texture information here
+                mesh = trimesh.util.concatenate(
+                    tuple(trimesh.Trimesh(vertices=g.vertices, faces=g.faces)
+                        for g in mesh.geometry.values()))
+        else:
+            assert(isinstance(mesh, trimesh.Trimesh))
+        # Recenter to [-1, 1]
+        mesh.vertices -= mesh.vertices.mean(0)
+        mesh.vertices /= np.max(np.abs(mesh.vertices))
+        # mesh.vertices = .5 * (mesh.vertices + 1.)
+
+        c0, c1 = mesh.vertices.min(0) - 1e-3, mesh.vertices.max(0) + 1e-3
+        self.mesh = mesh
+        self.corners = (c0, c1)
+        
+        cache_file = mesh_path.split('.')[0] + '_test_pts.npy'
+        if not os.path.exists(cache_file):
+            print('regen pts')
+            self.test_pts = np.array([self.make_test_pts(), self.make_test_pts()])
+            np.save(cache_file, self.test_pts)
+        else:
+            print('load pts')
+            self.test_pts = np.load(cache_file)
+
+        
+
+    def make_test_pts(self, mesh, corners):
+        pass
+
+
 
 
 class Video(Dataset):

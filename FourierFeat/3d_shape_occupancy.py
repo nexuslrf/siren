@@ -504,7 +504,7 @@ mesh_files = {
     'lucy'      : 'Alucy.obj',
 }
 
-logdir = os.path.join(basedir, 'occupancy_logs')
+logdir = os.path.join(basedir, 'logs/occupancy_logs')
 os.makedirs(logdir, exist_ok=True)
 
 N_iters = 1000
