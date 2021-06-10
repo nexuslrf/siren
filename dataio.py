@@ -502,10 +502,26 @@ class Mesh(Dataset):
             print('load pts')
             self.test_pts = np.load(cache_file)
 
-        
+    def make_test_pts(self, test_size=2**18):
+        c0, c1 = self.corners
+        test_easy = np.random.uniform(size=[test_size, 3]) * (c1-c0) + c0
+        batch_pts, batch_normals = self.get_normal_batch(self.mesh, test_size)
+        test_hard = batch_pts + np.random.normal(size=[test_size,3]) * .01
+        return test_easy, test_hard
+    
+    def get_normal_batch(self, bsize):
+        def uniform_bary(u):
+            su0 = np.sqrt(u[..., 0])
+            b0 = 1. - su0
+            b1 = u[..., 1] * su0
+            return np.stack([b0, b1, 1. - b0 - b1], -1)
+        batch_face_inds = np.array(np.random.randint(0, mesh.faces.shape[0], [bsize]))
+        batch_barys = np.array(uniform_bary(np.random.uniform(size=[bsize, 2])))
+        batch_faces = self.mesh.faces[batch_face_inds]
+        batch_normals = self.mesh.face_normals[batch_face_inds]
+        batch_pts = np.sum(self.mesh.vertices[batch_faces] * batch_barys[...,None], 1)
 
-    def make_test_pts(self, mesh, corners):
-        pass
+        return batch_pts, batch_normals
 
 
 
