@@ -1,3 +1,4 @@
+import enum
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -10,6 +11,7 @@ import cv2
 import meta_modules
 import scipy.io.wavfile as wavfile
 import cmapy
+import loss_functions
 
 
 def cond_mkdir(path):
@@ -283,11 +285,30 @@ def write_sdf_summary(model, model_input, gt, model_output, writer, total_steps,
         min_max_summary(prefix + 'model_out_min_max', model_output['model_out'], writer, total_steps)
         min_max_summary(prefix + 'coords', model_input['coords'], writer, total_steps)
 
-def write_occupancy_summary(test_pts, model, model_input, gt, model_output, writter, total_steps, prefix='train_'):
+def write_occupancy_summary(test_pts, model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
     with torch.no_grad():
-        
-        model()
 
+        plot_out = model({'coords': test_pts['pts_plot'].cuda()})
+        plot_gt = {'occupancy': test_pts['gt_plot'].cuda()}
+        pred = torch.sigmoid(plot_out['model_out'])
+        psnr = -10.*torch.log10(torch.mean((pred-plot_gt['occupancy'])**2))
+        # TODO implement render_rays
+        rendering = render_rays(model)
+        pass
+
+        # TODO writer add_image
+
+        writer.add_scalar('slice_psnr', psnr.cpu().numpy(), total_steps)
+        
+        for i, (pts, gt) in enumerate(zip(test_pts['pts_metrics'], test_pts['gt_metrics'])):
+            pred = model({'coords': pts.cuda()}).sigmoid()
+            gt = gt.cuda()
+            val_iou = torch.logical_and(pred > .5, gt > .5).sum() / \
+                torch.logical_or(pred > .5, gt > .5).sum()
+
+
+def render_rays(model):
+    pass
 
 def hypernet_activation_summary(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
     with torch.no_grad():
