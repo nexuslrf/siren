@@ -283,6 +283,11 @@ def write_sdf_summary(model, model_input, gt, model_output, writer, total_steps,
         min_max_summary(prefix + 'model_out_min_max', model_output['model_out'], writer, total_steps)
         min_max_summary(prefix + 'coords', model_input['coords'], writer, total_steps)
 
+def write_occupancy_summary(test_pts, model, model_input, gt, model_output, writter, total_steps, prefix='train_'):
+    with torch.no_grad():
+        
+        model()
+
 
 def hypernet_activation_summary(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
     with torch.no_grad():

@@ -11,6 +11,7 @@ import dataio, meta_modules, utils, training, loss_functions, modules
 import torch
 from torch.utils.data import DataLoader
 import configargparse
+from functools import partial
 
 p = configargparse.ArgumentParser()
 p.add('-c', '--config_filepath', required=False, is_config_file=True, help='Path to config file.')
@@ -21,7 +22,7 @@ p.add_argument('--experiment_name', type=str, required=True,
 
 # General training options
 p.add_argument('--batch_size', type=int, default=1)
-p.add_argument('--points_per_batch', type=int, default=1400)
+p.add_argument('--points_per_batch', type=int, default=32768)
 p.add_argument('--lr', type=float, default=1e-4, help='learning rate. default=5e-5')
 p.add_argument('--num_epochs', type=int, default=4000,
                help='Number of epochs to train for.')
@@ -48,8 +49,8 @@ p.add_argument('--test_dim', type=int, default=512)
 opt = p.parse_args()
 
 
-sdf_dataset = dataio.PointCloud(opt.point_cloud_path, on_surface_points=opt.points_per_batch)
-dataloader = DataLoader(sdf_dataset, shuffle=True, batch_size=opt.batch_size, pin_memory=True, num_workers=4)
+mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size)
+dataloader = DataLoader(mesh_dataset, shuffle=True, batch_size=1, pin_memory=True, num_workers=0)
 
 # Define the model.
 if opt.model_type == 'nerf':
@@ -61,14 +62,14 @@ else:
 model.cuda()
 
 # Define the loss
-loss_fn = loss_functions.sdf
-summary_fn = utils.write_sdf_summary
+loss_fn = loss_functions.occupancy_3d
+summary_fn = partial(utils.write_occupancy_summary, mesh_dataset.pts_eval)
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 
 if not opt.speed_test:
     training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
-                steps_til_summary=opt.steps_til_summary * len(sdf_dataset), epochs_til_checkpoint=opt.epochs_til_ckpt,
+                steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
                 model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, double_precision=False,
                 clip_grad=True, split_train=opt.split_train)
 

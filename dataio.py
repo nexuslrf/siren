@@ -508,11 +508,25 @@ class Mesh(Dataset):
         cache_file = mesh_path.split('.')[0] + '_test_pts.npy'
         if not os.path.exists(cache_file):
             print('regen pts')
-            self.test_pts = np.array([self.make_test_pts(), self.make_test_pts()])
-            np.save(cache_file, self.test_pts)
+            test_pts = self.make_test_pts()
+            np.save(cache_file, test_pts)
         else:
             print('load pts')
-            self.test_pts = np.load(cache_file)
+            test_pts = np.load(cache_file)
+        test_pts = [torch.from_numpy(test) for test in test_pts]
+        test_gt = [torch.from_numpy(self.gt_fn(test)) for test in test_pts]
+
+        N = 256
+        x_test = np.linspace(0.,1.,N, endpoint=False) * 1.
+        x_test = np.stack(np.meshgrid(*([x_test]*2), indexing='ij'), -1)
+        pts_plot = np.concatenate([x_test, .5 + np.zeros_like(x_test[...,0:1])], -1)
+        gt_plot = self.gt_fn(pts_plot)
+        self.pts_eval = {
+            'pts_metrics': test_pts,
+            'gt_metrics': test_gt,
+            'pts_plot': torch.from_numpy(pts_plot),
+            'gt_plot': torch.from_numpy(gt_plot)
+        }
 
     def make_test_pts(self, test_size=2**18):
         c0, c1 = self.corners
@@ -534,6 +548,9 @@ class Mesh(Dataset):
         batch_pts = np.sum(self.mesh.vertices[batch_faces] * batch_barys[...,None], 1)
 
         return batch_pts, batch_normals
+    
+    def gt_fn(self, pts):
+        return self.mesh.ray.contains_points(pts.reshape([-1,3])).reshape(pts.shape[:-1])
 
     def __len__(self):
         return self.num_batches
@@ -541,7 +558,7 @@ class Mesh(Dataset):
     def __getitem__(self, idx):
         pts = np.random.uniform(size=[self.pts_per_batch, 3]) * \
             (self.corners[1]-self.corners[0]) + self.corners[0]
-        gt = self.mesh.ray.contains_points(pts.reshape([-1,3])).reshape(pts.shape[:-1])
+        gt = self.gt_fn(pts)
         
         return {'coords': torch.from_numpy(pts).float()}, {'occupancy': torch.from_numpy(gt).float()}
 
