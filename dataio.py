@@ -467,8 +467,11 @@ class PointCloud(Dataset):
 
 
 class Mesh(Dataset):
-    def __init__(self, mesh_path, ):
+    def __init__(self, mesh_path, pts_per_batch, keep_aspect_ratio=True, num_batches=1,):
         super().__init__()
+        self.num_batches = num_batches
+        self.pts_per_batch = pts_per_batch
+
         mesh = trimesh.load(mesh_path)
         """
         Convert a possible scene to a mesh. If conversion occurs, 
@@ -485,9 +488,18 @@ class Mesh(Dataset):
         else:
             assert(isinstance(mesh, trimesh.Trimesh))
         # Recenter to [-1, 1]
+        # it may distort geometry, but makes for high sample efficiency
         mesh.vertices -= mesh.vertices.mean(0)
-        mesh.vertices /= np.max(np.abs(mesh.vertices))
-        # mesh.vertices = .5 * (mesh.vertices + 1.)
+        if keep_aspect_ratio:
+            mesh_max = np.amax(mesh.vertices)
+            mesh_min = np.amin(mesh.vertices)
+        else:
+            mesh_max = np.amax(mesh.vertices, axis=0, keepdims=True)
+            mesh_min = np.amin(mesh.vertices, axis=0, keepdims=True)
+        
+        mesh.vertices = (mesh.vertices - mesh_min) / (mesh_max - mesh_min)
+        mesh.vertices -= 0.5
+        mesh.vertices *= 2.
 
         c0, c1 = mesh.vertices.min(0) - 1e-3, mesh.vertices.max(0) + 1e-3
         self.mesh = mesh
@@ -505,7 +517,7 @@ class Mesh(Dataset):
     def make_test_pts(self, test_size=2**18):
         c0, c1 = self.corners
         test_easy = np.random.uniform(size=[test_size, 3]) * (c1-c0) + c0
-        batch_pts, batch_normals = self.get_normal_batch(self.mesh, test_size)
+        batch_pts, batch_normals = self.get_normal_batch(test_size)
         test_hard = batch_pts + np.random.normal(size=[test_size,3]) * .01
         return test_easy, test_hard
     
@@ -515,7 +527,7 @@ class Mesh(Dataset):
             b0 = 1. - su0
             b1 = u[..., 1] * su0
             return np.stack([b0, b1, 1. - b0 - b1], -1)
-        batch_face_inds = np.array(np.random.randint(0, mesh.faces.shape[0], [bsize]))
+        batch_face_inds = np.array(np.random.randint(0, self.mesh.faces.shape[0], [bsize]))
         batch_barys = np.array(uniform_bary(np.random.uniform(size=[bsize, 2])))
         batch_faces = self.mesh.faces[batch_face_inds]
         batch_normals = self.mesh.face_normals[batch_face_inds]
@@ -523,8 +535,15 @@ class Mesh(Dataset):
 
         return batch_pts, batch_normals
 
+    def __len__(self):
+        return self.num_batches
 
-
+    def __getitem__(self, idx):
+        pts = np.random.uniform(size=[self.pts_per_batch, 3]) * \
+            (self.corners[1]-self.corners[0]) + self.corners[0]
+        gt = self.mesh.ray.contains_points(pts.reshape([-1,3])).reshape(pts.shape[:-1])
+        
+        return {'coords': torch.from_numpy(pts).float()}, {'occupancy': torch.from_numpy(gt).float()}
 
 class Video(Dataset):
     def __init__(self, path_to_video):

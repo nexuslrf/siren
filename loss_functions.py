@@ -238,3 +238,9 @@ def sdf(model_output, gt):
             'grad_constraint': grad_constraint.mean() * 5e1}  # 1e1      # 5e1
 
 # inter = 3e3 for ReLU-PE
+
+def occupancy_3d(model_output, gt):
+    x = model_output['model_out']
+    z = gt['occupancy']
+    loss = torch.mean(torch.relu(x, 0) - x * z + torch.log(1 + torch.exp(-torch.abs(x))))
+    return loss
