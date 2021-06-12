@@ -242,5 +242,5 @@ def sdf(model_output, gt):
 def occupancy_3d(model_output, gt):
     x = model_output['model_out']
     z = gt['occupancy']
-    loss = torch.mean(torch.relu(x, 0) - x * z + torch.log(1 + torch.exp(-torch.abs(x))))
-    return loss
+    loss = torch.mean(torch.relu(x) - x * z + torch.log(1 + torch.exp(-torch.abs(x))))
+    return {'entropy': loss}

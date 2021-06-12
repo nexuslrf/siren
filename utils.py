@@ -12,12 +12,11 @@ import meta_modules
 import scipy.io.wavfile as wavfile
 import cmapy
 import loss_functions
-
+from ray_rendering import *
 
 def cond_mkdir(path):
     if not os.path.exists(path):
         os.makedirs(path)
-
 
 def write_result_img(experiment_name, filename, img):
     root_path = '/media/data1/sitzmann/generalization/results'
@@ -290,25 +289,34 @@ def write_occupancy_summary(test_pts, model, model_input, gt, model_output, writ
 
         plot_out = model({'coords': test_pts['pts_plot'].cuda()})
         plot_gt = {'occupancy': test_pts['gt_plot'].cuda()}
-        pred = torch.sigmoid(plot_out['model_out'])
+        pred = torch.sigmoid(plot_out['model_out']).squeeze(-1)
         psnr = -10.*torch.log10(torch.mean((pred-plot_gt['occupancy'])**2))
         # TODO implement render_rays
-        rendering = render_rays(model)
-        pass
-
+        depth_map, acc_map = render_rays(model, *test_pts['render_args_lr'])
+        norm_map = make_normals(test_pts['render_args_lr'][0], depth_map) * .5 + .5
         # TODO writer add_image
+        writer.add_image(prefix + 'slice_gt', make_grid(plot_gt['occupancy'], scale_each=False, normalize=True),
+                     global_step=total_steps)
+        writer.add_image(prefix + 'slice_pred', make_grid(pred, scale_each=False, normalize=True),
+                     global_step=total_steps)
+        # writer.add_image(prefix + 'slice_diff', make_grid((plot_gt['occupancy']-pred).abs(), scale_each=False, normalize=True),
+        #              global_step=total_steps)
+        writer.add_image(prefix + 'depth_map', make_grid(depth_map, scale_each=False, normalize=True),
+                     global_step=total_steps)
+        writer.add_image(prefix + 'acc_map', make_grid(acc_map, scale_each=False, normalize=True),
+                     global_step=total_steps)
+        writer.add_image(prefix + 'norm', make_grid(norm_map.permute(2,0,1), scale_each=False, normalize=True),
+                     global_step=total_steps)
+
 
         writer.add_scalar('slice_psnr', psnr.cpu().numpy(), total_steps)
         
         for i, (pts, gt) in enumerate(zip(test_pts['pts_metrics'], test_pts['gt_metrics'])):
-            pred = model({'coords': pts.cuda()}).sigmoid()
+            pred = model({'coords': pts.cuda()})['model_out'].sigmoid().squeeze(-1)
             gt = gt.cuda()
             val_iou = torch.logical_and(pred > .5, gt > .5).sum() / \
                 torch.logical_or(pred > .5, gt > .5).sum()
-
-
-def render_rays(model):
-    pass
+            writer.add_scalar(f'IoU_{i+1}', val_iou.cpu().numpy(), total_steps)
 
 def hypernet_activation_summary(model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
     with torch.no_grad():

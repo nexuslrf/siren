@@ -16,6 +16,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 import trimesh
+import ray_rendering
 
 
 def get_mgrid(sidelen, dim=2):
@@ -487,45 +488,67 @@ class Mesh(Dataset):
                         for g in mesh.geometry.values()))
         else:
             assert(isinstance(mesh, trimesh.Trimesh))
-        # Recenter to [-1, 1]
+
+        pts_range = [0., 1.]
+        # Recenter to [0, 1]
         # it may distort geometry, but makes for high sample efficiency
         mesh.vertices -= mesh.vertices.mean(0)
-        if keep_aspect_ratio:
-            mesh_max = np.amax(mesh.vertices)
-            mesh_min = np.amin(mesh.vertices)
-        else:
-            mesh_max = np.amax(mesh.vertices, axis=0, keepdims=True)
-            mesh_min = np.amin(mesh.vertices, axis=0, keepdims=True)
-        
-        mesh.vertices = (mesh.vertices - mesh_min) / (mesh_max - mesh_min)
-        mesh.vertices -= 0.5
-        mesh.vertices *= 2.
+        mesh.vertices /= np.max(np.abs(mesh.vertices))
+        mesh.vertices = .5 * (mesh.vertices + 1.)
+
+        # SIREN's recentering [-1, 1]
+        # if keep_aspect_ratio:
+        #     mesh_max = np.amax(mesh.vertices)
+        #     mesh_min = np.amin(mesh.vertices)
+        # else:
+        #     mesh_max = np.amax(mesh.vertices, axis=0, keepdims=True)
+        #     mesh_min = np.amin(mesh.vertices, axis=0, keepdims=True)
+        # mesh.vertices = (mesh.vertices - mesh_min) / (mesh_max - mesh_min)
+        # mesh.vertices -= 0.5
+        # mesh.vertices *= 2.
 
         c0, c1 = mesh.vertices.min(0) - 1e-3, mesh.vertices.max(0) + 1e-3
+
         self.mesh = mesh
         self.corners = (c0, c1)
         
-        cache_file = mesh_path.split('.')[0] + '_test_pts.npy'
-        if not os.path.exists(cache_file):
-            print('regen pts')
-            test_pts = self.make_test_pts()
-            np.save(cache_file, test_pts)
-        else:
-            print('load pts')
-            test_pts = np.load(cache_file)
-        test_pts = [torch.from_numpy(test) for test in test_pts]
-        test_gt = [torch.from_numpy(self.gt_fn(test)) for test in test_pts]
+        # cache_file = mesh_path.split('.')[0] + '_test_pts.npy'
+        # if not os.path.exists(cache_file):
+        #     print('regen pts')
+        #     test_pts = self.make_test_pts()
+        #     np.save(cache_file, test_pts)
+        # else:
+        #     print('load pts')
+        #     test_pts = np.load(cache_file)
+        test_pts = self.make_test_pts()
+
+        test_pts = [torch.from_numpy(test).float() for test in test_pts]
+        test_gt = [torch.from_numpy(self.gt_fn(test)).float() for test in test_pts]
 
         N = 256
-        x_test = np.linspace(0.,1.,N, endpoint=False) * 1.
+        x_test = np.linspace(*pts_range, N, endpoint=False) * 1.
         x_test = np.stack(np.meshgrid(*([x_test]*2), indexing='ij'), -1)
-        pts_plot = np.concatenate([x_test, .5 + np.zeros_like(x_test[...,0:1])], -1)
+        pts_plot = np.concatenate([x_test, 0.5 + np.zeros_like(x_test[...,0:1])], -1)
         gt_plot = self.gt_fn(pts_plot)
+
+        # for ray_rendering
+        R = 2.
+        c2w = ray_rendering.pose_spherical(90. + 10 + 45, -30., R)
+        N_samples = 64
+        N_samples_2 = 64
+        H = 180
+        W = H
+        focal = H * .9
+        render_args_lr = [
+            ray_rendering.get_rays(H, W, focal, c2w[:3,:4]), self.corners, 
+            R-1, R+1, N_samples, N_samples_2, True]
+
         self.pts_eval = {
             'pts_metrics': test_pts,
             'gt_metrics': test_gt,
-            'pts_plot': torch.from_numpy(pts_plot),
-            'gt_plot': torch.from_numpy(gt_plot)
+            'pts_plot': torch.from_numpy(pts_plot).float(),
+            'gt_plot': torch.from_numpy(gt_plot).float(),
+            'render_args_lr': render_args_lr
         }
 
     def make_test_pts(self, test_size=2**18):
@@ -558,7 +581,7 @@ class Mesh(Dataset):
     def __getitem__(self, idx):
         pts = np.random.uniform(size=[self.pts_per_batch, 3]) * \
             (self.corners[1]-self.corners[0]) + self.corners[0]
-        gt = self.gt_fn(pts)
+        gt = self.gt_fn(pts)[...,None]
         
         return {'coords': torch.from_numpy(pts).float()}, {'occupancy': torch.from_numpy(gt).float()}
 
