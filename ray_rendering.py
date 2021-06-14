@@ -50,11 +50,11 @@ def render_rays(model, rays, corners, near, far, N_samples, N_samples_2, clip):
     # Compute 3D query points
     z_vals = torch.linspace(near, far, N_samples).cuda()
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
-
+    pts = .5 * (pts + 1)
     # Run network
     alpha = model({'coords': pts})['model_out'].sigmoid().squeeze(-1)
     if clip:
-        mask = torch.logical_or(torch.any(.5 * (pts + 1) < c0, -1), torch.any(.5 * (pts + 1) > c1, -1))
+        mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
         alpha = torch.where(mask, torch.FloatTensor([0.]).cuda(), alpha)
 
     alpha = (alpha > th).float()
@@ -70,12 +70,12 @@ def render_rays(model, rays, corners, near, far, N_samples, N_samples_2, clip):
 
     z_vals = torch.linspace(-1., 1., N_samples_2).cuda() * .01 + depth_map[...,None]
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
-
+    pts = .5 * (pts + 1)
     # Run network
     alpha = model({'coords': pts.cuda()})['model_out'].sigmoid().squeeze(-1)
     if clip:
         # alpha = np.where(np.any(np.abs(pts) > 1, -1), 0., alpha)
-        mask = torch.logical_or(torch.any(.5 * (pts + 1) < c0, -1), torch.any(.5 * (pts + 1) > c1, -1))
+        mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
         alpha = torch.where(mask, torch.FloatTensor([0.]).cuda(), alpha)
 
     alpha = (alpha > th).float()

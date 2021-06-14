@@ -541,7 +541,7 @@ class Mesh(Dataset):
         focal = H * .9
         render_args_lr = [
             ray_rendering.get_rays(H, W, focal, c2w[:3,:4]), self.corners, 
-            R-1, R+1, N_samples, N_samples_2, True]
+                R-1, R+1, N_samples, N_samples_2, True]
 
         self.pts_eval = {
             'pts_metrics': test_pts,
