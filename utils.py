@@ -284,7 +284,7 @@ def write_sdf_summary(model, model_input, gt, model_output, writer, total_steps,
         min_max_summary(prefix + 'model_out_min_max', model_output['model_out'], writer, total_steps)
         min_max_summary(prefix + 'coords', model_input['coords'], writer, total_steps)
 
-def write_occupancy_summary(test_pts, model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
+def write_occupancy_summary(test_pts, mesh, model, model_input, gt, model_output, writer, total_steps, prefix='train_'):
     with torch.no_grad():
 
         plot_out = model({'coords': test_pts['pts_plot'].cuda()})
@@ -292,7 +292,7 @@ def write_occupancy_summary(test_pts, model, model_input, gt, model_output, writ
         pred = torch.sigmoid(plot_out['model_out']).squeeze(-1)
         psnr = -10.*torch.log10(torch.mean((pred-plot_gt['occupancy'])**2))
         # TODO implement render_rays
-        depth_map, acc_map = render_rays(model, *test_pts['render_args_lr'])
+        depth_map, acc_map = render_rays(model, mesh, *test_pts['render_args_lr'])
         norm_map = make_normals(test_pts['render_args_lr'][0], depth_map) * .5 + .5
         # TODO writer add_image
         writer.add_image(prefix + 'slice_gt', make_grid(plot_gt['occupancy'], scale_each=False, normalize=True),

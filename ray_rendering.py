@@ -41,7 +41,7 @@ def pose_spherical(theta, phi, radius):
     # c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
     return c2w
 
-def render_rays(model, rays, corners, near, far, N_samples, N_samples_2, clip):
+def render_rays(model, mesh, rays, corners, near, far, N_samples, N_samples_2, clip, pts_trans_fn):
     rays_o, rays_d = rays[0].cuda(), rays[1].cuda()
     c0, c1 = (torch.as_tensor(c).cuda() for c in corners)
 
@@ -50,7 +50,7 @@ def render_rays(model, rays, corners, near, far, N_samples, N_samples_2, clip):
     # Compute 3D query points
     z_vals = torch.linspace(near, far, N_samples).cuda()
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
-    pts = .5 * (pts + 1)
+    pts = pts_trans_fn(pts)
     # Run network
     alpha = model({'coords': pts})['model_out'].sigmoid().squeeze(-1)
     if clip:
@@ -70,7 +70,7 @@ def render_rays(model, rays, corners, near, far, N_samples, N_samples_2, clip):
 
     z_vals = torch.linspace(-1., 1., N_samples_2).cuda() * .01 + depth_map[...,None]
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
-    pts = .5 * (pts + 1)
+    pts = pts_trans_fn(pts)
     # Run network
     alpha = model({'coords': pts.cuda()})['model_out'].sigmoid().squeeze(-1)
     if clip:

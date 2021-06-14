@@ -203,12 +203,12 @@ def get_rays(H, W, focal, c2w):
     rays_o = np.broadcast_to(c2w[:3,-1], rays_d.shape)
     return np.stack([rays_o, rays_d], 0)
 
-get_rays = jit(get_rays, static_argnums=(0, 1, 2,))
+# get_rays = jit(get_rays, static_argnums=(0, 1, 2,))
 
 #########
 
 
-def render_rays_native_hier(params, ab, rays, corners, near, far, N_samples, N_samples_2, clip): #, rand=False):
+def render_rays(params, ab, rays, corners, near, far, N_samples, N_samples_2, clip): #, rand=False):
     rays_o, rays_d = rays[0], rays[1]
     c0, c1 = corners
 
@@ -256,7 +256,7 @@ def render_rays_native_hier(params, ab, rays, corners, near, far, N_samples, N_s
 
     return depth_map, acc_map
 
-render_rays = jit(render_rays_native_hier, static_argnums=(3,4,5,6,7,8))
+# render_rays = jit(render_rays, static_argnums=(3,4,5,6,7,8))
 
 
 

@@ -323,6 +323,8 @@ class SingleBVPNet(MetaModule):
                                                        sidelength=kwargs.get('sidelength', None),
                                                        fn_samples=kwargs.get('fn_samples', None),
                                                        use_nyquist=kwargs.get('use_nyquist', True),
+                                                       freq_params=kwargs.get('freq_params', None),
+                                                       include_coord=kwargs.get('include_coord', True),
                                                        freq_last=split_mlp)
             in_features = self.positional_encoding.out_dim
         elif pos_enc:
@@ -470,30 +472,44 @@ class ImageDownsampling(nn.Module):
 
 class PosEncodingNeRF(nn.Module):
     '''Module to add positional encoding as in NeRF [Mildenhall et al. 2020].'''
-    def __init__(self, in_features, sidelength=None, fn_samples=None, use_nyquist=True, freq_last=False):
+    '''freq_params: [embedding_scale, embedding_size]
+    '''
+    def __init__(self, in_features, sidelength=None, fn_samples=None, use_nyquist=True, freq_last=False, 
+        freq_params=None, include_coord=True):
+
         super().__init__()
 
         self.in_features = in_features
         self.freq_last = freq_last
+        self.include_coord = include_coord
 
-        if self.in_features == 3:
-            self.num_frequencies = 10
-        elif self.in_features == 2:
-            assert sidelength is not None
-            if isinstance(sidelength, int):
-                sidelength = (sidelength, sidelength)
-            self.num_frequencies = 4
-            if use_nyquist:
-                self.num_frequencies = self.get_num_frequencies_nyquist(min(sidelength[0], sidelength[1]))
-        elif self.in_features == 1:
-            if fn_samples is None:
-                fn_samples = min(sidelength[0], sidelength[1])
-            self.num_frequencies = 4
-            if use_nyquist:
-                self.num_frequencies = self.get_num_frequencies_nyquist(fn_samples)
+        if freq_params is None:
+            if self.in_features == 3:
+                self.num_frequencies = 10
+            elif self.in_features == 2:
+                assert sidelength is not None
+                if isinstance(sidelength, int):
+                    sidelength = (sidelength, sidelength)
+                self.num_frequencies = 4
+                if use_nyquist:
+                    self.num_frequencies = self.get_num_frequencies_nyquist(min(sidelength[0], sidelength[1]))
+            elif self.in_features == 1:
+                if fn_samples is None:
+                    fn_samples = min(sidelength[0], sidelength[1])
+                self.num_frequencies = 4
+                if use_nyquist:
+                    self.num_frequencies = self.get_num_frequencies_nyquist(fn_samples)
 
-        self.out_dim = in_features + 2 * in_features * self.num_frequencies
-        self.freq_bands = nn.parameter.Parameter(2**torch.arange(self.num_frequencies) * np.pi, requires_grad=False)
+            self.out_dim = 2 * in_features * self.num_frequencies
+            self.out_dim = self.out_dim + in_features if include_coord else self.out_dim
+            self.freq_bands = nn.parameter.Parameter(2**torch.arange(self.num_frequencies) * np.pi, requires_grad=False)
+        else:
+            self.num_frequencies = freq_params[1]
+            self.out_dim = 2 * in_features * self.num_frequencies
+            self.out_dim = self.out_dim + in_features if include_coord else self.out_dim
+
+            bval = 2.**torch.linspace(0,freq_params[0], freq_params[1]) - 1
+            self.freq_bands = nn.parameter.Parameter(2 * bval * np.pi, requires_grad=False)
 
     def get_num_frequencies_nyquist(self, samples):
         nyquist_rate = 1 / (2 * (2 * 1 / samples))
@@ -513,7 +529,8 @@ class PosEncodingNeRF(nn.Module):
         sin = torch.sin(coords_pos_enc)
         cos = torch.cos(coords_pos_enc)
         coords_pos_enc = torch.cat([sin, cos], -1).reshape(list(coords_pos_enc.shape)[:-2] + [-1])
-        coords_pos_enc = torch.cat([coords, coords_pos_enc], -1)
+        if self.include_coord:
+            coords_pos_enc = torch.cat([coords, coords_pos_enc], -1)
 
         if self.freq_last:
             sh = coords_pos_enc.shape[:-1]

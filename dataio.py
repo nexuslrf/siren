@@ -18,6 +18,9 @@ from torchvision.transforms import Resize, Compose, ToTensor, Normalize
 import trimesh
 import ray_rendering
 
+# Cavaet! See this: https://tanelp.github.io/posts/a-bug-that-plagues-thousands-of-open-source-ml-projects/
+def worker_init_fn(worker_id):                                                          
+    np.random.seed(np.random.get_state()[1][0] + worker_id)
 
 def get_mgrid(sidelen, dim=2):
     '''Generates a flattened grid of (x,y,...) coordinates in a range of -1 to 1.'''
@@ -468,7 +471,7 @@ class PointCloud(Dataset):
 
 
 class Mesh(Dataset):
-    def __init__(self, mesh_path, pts_per_batch, keep_aspect_ratio=True, num_batches=1,):
+    def __init__(self, mesh_path, pts_per_batch, keep_aspect_ratio=True, num_batches=1, recenter='fourier'):
         super().__init__()
         self.num_batches = num_batches
         self.pts_per_batch = pts_per_batch
@@ -489,23 +492,29 @@ class Mesh(Dataset):
         else:
             assert(isinstance(mesh, trimesh.Trimesh))
 
-        pts_range = [0., 1.]
-        # Recenter to [0, 1]
-        # it may distort geometry, but makes for high sample efficiency
-        mesh.vertices -= mesh.vertices.mean(0)
-        mesh.vertices /= np.max(np.abs(mesh.vertices))
-        mesh.vertices = .5 * (mesh.vertices + 1.)
-
-        # SIREN's recentering [-1, 1]
-        # if keep_aspect_ratio:
-        #     mesh_max = np.amax(mesh.vertices)
-        #     mesh_min = np.amin(mesh.vertices)
-        # else:
-        #     mesh_max = np.amax(mesh.vertices, axis=0, keepdims=True)
-        #     mesh_min = np.amin(mesh.vertices, axis=0, keepdims=True)
-        # mesh.vertices = (mesh.vertices - mesh_min) / (mesh_max - mesh_min)
-        # mesh.vertices -= 0.5
-        # mesh.vertices *= 2.
+        if recenter == 'fourier':
+            # Recenter to [0, 1]
+            pts_range = [0., 1.]
+            slice_offset = 0.5
+            mesh.vertices -= mesh.vertices.mean(0)
+            mesh.vertices /= np.max(np.abs(mesh.vertices))
+            mesh.vertices = .5 * (mesh.vertices + 1.)
+            pts_trans_fn = lambda x: .5 * (x + 1)
+        elif recenter == 'siren':
+            # SIREN's recentering [-1, 1]
+            # it may distort geometry, but makes for high sample efficiency
+            pts_range = [-1., 1.]
+            slice_offset = -0.17
+            if keep_aspect_ratio:
+                mesh_max = np.amax(mesh.vertices)
+                mesh_min = np.amin(mesh.vertices)
+            else:
+                mesh_max = np.amax(mesh.vertices, axis=0, keepdims=True)
+                mesh_min = np.amin(mesh.vertices, axis=0, keepdims=True)
+            mesh.vertices = (mesh.vertices - mesh_min) / (mesh_max - mesh_min)
+            mesh.vertices -= 0.5
+            mesh.vertices *= 2.
+            pts_trans_fn = lambda x: x * 1.2
 
         c0, c1 = mesh.vertices.min(0) - 1e-3, mesh.vertices.max(0) + 1e-3
 
@@ -528,7 +537,7 @@ class Mesh(Dataset):
         N = 256
         x_test = np.linspace(*pts_range, N, endpoint=False) * 1.
         x_test = np.stack(np.meshgrid(*([x_test]*2), indexing='ij'), -1)
-        pts_plot = np.concatenate([x_test, 0.5 + np.zeros_like(x_test[...,0:1])], -1)
+        pts_plot = np.concatenate([x_test, slice_offset + np.zeros_like(x_test[...,0:1])], -1)
         gt_plot = self.gt_fn(pts_plot)
 
         # for ray_rendering
@@ -541,7 +550,7 @@ class Mesh(Dataset):
         focal = H * .9
         render_args_lr = [
             ray_rendering.get_rays(H, W, focal, c2w[:3,:4]), self.corners, 
-                R-1, R+1, N_samples, N_samples_2, True]
+                R-1, R+1, N_samples, N_samples_2, True, pts_trans_fn]
 
         self.pts_eval = {
             'pts_metrics': test_pts,

@@ -55,7 +55,7 @@ elif opt.dataset == 'bikes':
 
 vid_dataset = dataio.Video(video_path)
 coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, split_coord=opt.split_train, sample_fraction=opt.sample_frac, frame_sample_fraction=0.608, pixel_sample_fraction=0.00625, batch_size=opt.batch_size)
-dataloader = DataLoader(coord_dataset, shuffle=False, batch_size=1, pin_memory=True, num_workers=opt.workers)
+dataloader = DataLoader(coord_dataset, shuffle=False, batch_size=1, pin_memory=True, num_workers=opt.workers, worker_init_fn=dataio.worker_init_fn)
 
 if opt.st_split:
     split_rule = [1,2]
