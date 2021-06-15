@@ -23,7 +23,7 @@ p.add_argument('--experiment_name', type=str, required=True,
 # General training options
 p.add_argument('--batch_size', type=int, default=1)
 p.add_argument('--points_per_batch', type=int, default=32768)
-p.add_argument('--lr', type=float, default=1e-4, help='learning rate. default=5e-5')
+p.add_argument('--lr', type=float, default=5e-4, help='learning rate. default=5e-5')
 p.add_argument('--num_epochs', type=int, default=10000,
                help='Number of epochs to train for.')
 
@@ -48,7 +48,7 @@ p.add_argument('--split_train', action='store_true')
 p.add_argument('--test_dim', type=int, default=512)
 p.add_argument('-j', '--workers', default=4, type=int, help='number of data loading workers (default: 4)')
 p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fourier')
-p.add_argument('--lr_decay', type=float, default=1) # 0.1 ** (1/5000) = 0.9995395890030878
+p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
 opt = p.parse_args()
 
 mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter)

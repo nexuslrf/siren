@@ -11,7 +11,7 @@ import os
 import shutil
 from collections import OrderedDict
 
-def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_checkpoint, model_dir, loss_fn, summary_fn,
+def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_checkpoint, model_dir, loss_fn, summary_fn, lr_sched=None,
     val_dataloader=None, double_precision=False, clip_grad=False, use_lbfgs=False, loss_schedules=None, split_train=False):
 
     optim = torch.optim.Adam(lr=lr, params=model.parameters())
@@ -21,6 +21,8 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
     if use_lbfgs:
         optim = torch.optim.LBFGS(lr=lr, params=model.parameters(), max_iter=50000, max_eval=50000,
                                   history_size=50, line_search_fn='strong_wolfe')
+
+    scheduler = lr_sched(optim) if lr_sched is not None else None
 
     if os.path.exists(model_dir):
         val = input("The model directory %s exists. Overwrite? (y/n)"%model_dir)
@@ -57,6 +59,7 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
                             checkpoints_dir, summary_fn, clip_grad, split_train)
 
                 pbar.update(1)
+                if scheduler is not None: scheduler.step()
 
                 if not total_steps % steps_til_summary:
                     tqdm.write("Epoch %d, Total loss %0.6f, iteration time %0.6f" % (total_steps, train_loss, time.time() - start_time))
