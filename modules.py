@@ -254,7 +254,7 @@ class SplitFCBlock(MetaModule):
                 h = h.prod(-2)
             h = self.net[self.approx_layers-1][1](h)
 
-        if self.atten:
+        if self.use_atten:
             h = h * self.atten(coords)
         if self.approx_layers == self.num_hidden_layers + 1:
             h = h.sum(-1, keepdim=True)

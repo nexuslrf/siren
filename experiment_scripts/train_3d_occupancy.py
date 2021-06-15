@@ -48,6 +48,7 @@ p.add_argument('--split_train', action='store_true')
 p.add_argument('--test_dim', type=int, default=512)
 p.add_argument('-j', '--workers', default=4, type=int, help='number of data loading workers (default: 4)')
 p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fourier')
+p.add_argument('--lr_decay', type=float, default=1) # 0.1 ** (1/5000) = 0.9995395890030878
 opt = p.parse_args()
 
 mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter)
@@ -68,6 +69,7 @@ model.cuda()
 # Define the loss
 loss_fn = loss_functions.occupancy_3d
 summary_fn = partial(utils.write_occupancy_summary, mesh_dataset.pts_eval, mesh_dataset)
+lr_sched = lambda optim: torch.optim.lr_scheduler.ExponentialLR(optim, opt.lr_decay)
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 
@@ -75,7 +77,7 @@ if not opt.speed_test:
     training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
                 steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
                 model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, double_precision=False,
-                clip_grad=True, split_train=opt.split_train)
+                clip_grad=True, split_train=opt.split_train, lr_sched=lr_sched)
 
 # # test sdf speed
 else:
