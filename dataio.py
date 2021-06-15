@@ -19,8 +19,9 @@ import trimesh
 import ray_rendering
 
 # Cavaet! See this: https://tanelp.github.io/posts/a-bug-that-plagues-thousands-of-open-source-ml-projects/
+# and this: https://discuss.pytorch.org/t/how-to-set-the-same-random-seed-for-all-workers/92253/7
 def worker_init_fn(worker_id):                                                          
-    np.random.seed(np.random.get_state()[1][0] + worker_id)
+    np.random.seed(int(torch.utils.data.get_worker_info().seed)%(2**32-1))
 
 def get_mgrid(sidelen, dim=2):
     '''Generates a flattened grid of (x,y,...) coordinates in a range of -1 to 1.'''
@@ -521,15 +522,14 @@ class Mesh(Dataset):
         self.mesh = mesh
         self.corners = (c0, c1)
         
-        # cache_file = mesh_path.split('.')[0] + '_test_pts.npy'
-        # if not os.path.exists(cache_file):
-        #     print('regen pts')
-        #     test_pts = self.make_test_pts()
-        #     np.save(cache_file, test_pts)
-        # else:
-        #     print('load pts')
-        #     test_pts = np.load(cache_file)
-        test_pts = self.make_test_pts()
+        cache_file = mesh_path.split('.')[0] + f'_{recenter}_test_pts.npy'
+        if not os.path.exists(cache_file):
+            print('regen pts')
+            test_pts = self.make_test_pts()
+            np.save(cache_file, test_pts)
+        else:
+            print('load pts')
+            test_pts = np.load(cache_file)
 
         test_pts = [torch.from_numpy(test).float() for test in test_pts]
         test_gt = [torch.from_numpy(self.gt_fn(test)).float() for test in test_pts]
