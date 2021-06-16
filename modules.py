@@ -204,6 +204,11 @@ class SplitFCBlock(MetaModule):
         if use_atten:
             self.atten = BatchLinear(in_features, hidden_features)
             self.atten.apply(self.weight_init)
+        if fusion_before_act and nonlinearity.endswith('elu') and \
+            self.approx_layers-1 != self.num_hidden_layers + 1:
+            
+            self.net[self.approx_layers-1][1].inplace = False
+            
 
     def forward(self, coords, params=None, pos_codes=None, split_coord=False, **kwargs):
         """

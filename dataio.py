@@ -472,10 +472,12 @@ class PointCloud(Dataset):
 
 
 class Mesh(Dataset):
-    def __init__(self, mesh_path, pts_per_batch, keep_aspect_ratio=True, num_batches=1, recenter='fourier'):
+    def __init__(self, mesh_path, pts_per_batch, keep_aspect_ratio=True, num_batches=1, \
+        recenter='fourier', split_coord=False):
         super().__init__()
         self.num_batches = num_batches
         self.pts_per_batch = pts_per_batch
+        self.split_coord = split_coord
 
         mesh = trimesh.load(mesh_path)
         """
@@ -582,18 +584,28 @@ class Mesh(Dataset):
 
         return batch_pts, batch_normals
     
-    def gt_fn(self, pts):
-        return self.mesh.ray.contains_points(pts.reshape([-1,3])).reshape(pts.shape[:-1])
+    def gt_fn(self, pts, split_coord=False):
+        if split_coord:
+            x, y, z = np.meshgrid(np.squeeze(pts[0]), np.squeeze(pts[1]), np.squeeze(pts[2]), indexing='ij')
+            final = np.stack([x,y,z],axis=-1).reshape([-1,3])
+            return self.mesh.ray.contains_points(final).reshape(final.shape[:-1])
+        else:
+            return self.mesh.ray.contains_points(pts.reshape([-1,3])).reshape(pts.shape[:-1])
 
     def __len__(self):
         return self.num_batches
 
     def __getitem__(self, idx):
-        pts = np.random.uniform(size=[self.pts_per_batch, 3]) * \
-            (self.corners[1]-self.corners[0]) + self.corners[0]
-        gt = self.gt_fn(pts)[...,None]
-        
-        return {'coords': torch.from_numpy(pts).float()}, {'occupancy': torch.from_numpy(gt).float()}
+        if self.split_coord:
+            pts = [(torch.rand(self.pts_per_batch, 1) * (self.corners[1][i]-self.corners[0][i]) + self.corners[0][i]) for i in range(3)]
+            gt = self.gt_fn(pts, split_coord=True)[...,None]
+            return {'coords_split': [pts[0].view(-1, 1, 1, 1), pts[1].view(1, -1, 1, 1), pts[2].view(1, 1, -1, 1)]},\
+                {'occupancy': torch.from_numpy(gt).float()}
+        else:
+            pts = np.random.uniform(size=[self.pts_per_batch, 3]) * \
+                (self.corners[1]-self.corners[0]) + self.corners[0]
+            gt = self.gt_fn(pts)[...,None]
+            return {'coords': torch.from_numpy(pts).float()}, {'occupancy': torch.from_numpy(gt).float()}
 
 class Video(Dataset):
     def __init__(self, path_to_video):

@@ -53,7 +53,7 @@ p.add_argument('--use_atten', action='store_true')
 p.add_argument('--rbatches', type=int, default=1)
 opt = p.parse_args()
 
-mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter)
+mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter, split_coord=opt.split_train)
 dataloader = DataLoader(mesh_dataset, shuffle=False, batch_size=1, pin_memory=True, num_workers=opt.workers, worker_init_fn=dataio.worker_init_fn)
 
 # Define the model.
