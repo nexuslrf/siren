@@ -50,6 +50,7 @@ p.add_argument('-j', '--workers', default=4, type=int, help='number of data load
 p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fourier')
 p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
 p.add_argument('--use_atten', action='store_true')
+p.add_argument('--rbatches', type=int, default=1)
 opt = p.parse_args()
 
 mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter)
@@ -69,7 +70,7 @@ model.cuda()
 
 # Define the loss
 loss_fn = loss_functions.occupancy_3d
-summary_fn = partial(utils.write_occupancy_summary, mesh_dataset.pts_eval, mesh_dataset)
+summary_fn = partial(utils.write_occupancy_summary, mesh_dataset.pts_eval, mesh_dataset, opt.rbatches)
 lr_sched = lambda optim: torch.optim.lr_scheduler.ExponentialLR(optim, opt.lr_decay)
 
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
