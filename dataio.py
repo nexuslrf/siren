@@ -505,7 +505,8 @@ class Mesh(Dataset):
             # SIREN's recentering [-1, 1]
             # it may distort geometry, but makes for high sample efficiency
             pts_range = [-1., 1.]
-            slice_offset = -0.17
+            slice_offset = 0.13
+            mesh.vertices -= mesh.vertices.mean(0)
             if keep_aspect_ratio:
                 mesh_max = np.amax(mesh.vertices)
                 mesh_min = np.amin(mesh.vertices)
