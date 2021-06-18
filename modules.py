@@ -247,6 +247,9 @@ class SplitFCBlock(MetaModule):
                 h = h.sum(-2)
             elif self.fusion_operator == 'prod':
                 h = h.prod(-2)
+
+            if self.use_atten:
+                h = h * self.atten(coords)
         else:
             # fusion before activation
             h = self.net[self.approx_layers-1][0](h)
@@ -257,10 +260,11 @@ class SplitFCBlock(MetaModule):
                 h = h.sum(-2)
             elif self.fusion_operator == 'prod':
                 h = h.prod(-2)
+            
+            if self.use_atten:
+                h = h * self.atten(coords)
             h = self.net[self.approx_layers-1][1](h)
 
-        if self.use_atten:
-            h = h * self.atten(coords)
         if self.approx_layers == self.num_hidden_layers + 1:
             h = h.sum(-1, keepdim=True)
         for i in range(self.approx_layers, self.num_hidden_layers+1):

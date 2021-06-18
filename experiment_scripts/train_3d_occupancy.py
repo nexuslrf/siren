@@ -112,3 +112,8 @@ else:
                 f"{model_output[...,0]}"
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/test_len}")
+# Test on RTX3090
+# test_dim=128, split_mlp: 0.016141505241394044
+# test_dim=128, 0.10274162769317627
+# test_dim=200, split_mlp: 0.031106233596801758
+# test_dim=200, OOM
