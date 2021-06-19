@@ -41,10 +41,12 @@ def pose_spherical(theta, phi, radius):
     # c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
     return c2w
 
-def render_rays(model, mesh, rays, corners, near, far, N_samples, N_samples_2, clip, pts_trans_fn):
+def render_rays(model, mesh, rays, corners, near, far, 
+        N_samples, N_samples_2, clip, pts_trans_fn, fine_pass=True):
+
     rays_o, rays_d = rays[0].cuda(), rays[1].cuda()
     c0, c1 = (torch.as_tensor(c).cuda() for c in corners)
-
+    
     th = .5
     
     # Compute 3D query points
@@ -52,7 +54,8 @@ def render_rays(model, mesh, rays, corners, near, far, N_samples, N_samples_2, c
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
     pts = pts_trans_fn(pts)
     # Run network
-    alpha = model({'coords': pts})['model_out'].sigmoid().squeeze(-1)
+    with torch.no_grad():
+        alpha = model({'coords': pts})['model_out'].sigmoid().squeeze(-1)
     if clip:
         mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
         alpha = torch.where(mask, torch.FloatTensor([0.]).cuda(), alpha)
@@ -66,26 +69,27 @@ def render_rays(model, mesh, rays, corners, near, far, N_samples, N_samples_2, c
     depth_map = torch.sum(weights * z_vals, -1) 
     acc_map = torch.sum(weights, -1)
 
-    # Second pass to refine isosurface
+    if fine_pass:
+        # Second pass to refine isosurface
+        z_vals = torch.linspace(-1., 1., N_samples_2).cuda() * .01 + depth_map[...,None]
+        pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
+        pts = pts_trans_fn(pts)
+        # Run network
+        with torch.no_grad():
+            alpha = model({'coords': pts.cuda()})['model_out'].sigmoid().squeeze(-1)
+        if clip:
+            # alpha = np.where(np.any(np.abs(pts) > 1, -1), 0., alpha)
+            mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
+            alpha = torch.where(mask, torch.FloatTensor([0.]).cuda(), alpha)
 
-    z_vals = torch.linspace(-1., 1., N_samples_2).cuda() * .01 + depth_map[...,None]
-    pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
-    pts = pts_trans_fn(pts)
-    # Run network
-    alpha = model({'coords': pts.cuda()})['model_out'].sigmoid().squeeze(-1)
-    if clip:
-        # alpha = np.where(np.any(np.abs(pts) > 1, -1), 0., alpha)
-        mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
-        alpha = torch.where(mask, torch.FloatTensor([0.]).cuda(), alpha)
+        alpha = (alpha > th).float()
 
-    alpha = (alpha > th).float()
-
-    trans = 1.-alpha + 1e-10
-    trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
-    weights = alpha * torch.cumprod(trans, -1)
-    
-    depth_map = torch.sum(weights * z_vals, -1) 
-    acc_map = torch.sum(weights, -1)
+        trans = 1.-alpha + 1e-10
+        trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
+        weights = alpha * torch.cumprod(trans, -1)
+        
+        depth_map = torch.sum(weights * z_vals, -1) 
+        acc_map = torch.sum(weights, -1)
 
     return depth_map, acc_map
 

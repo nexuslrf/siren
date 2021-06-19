@@ -502,7 +502,7 @@ class Mesh(Dataset):
             mesh.vertices -= mesh.vertices.mean(0)
             mesh.vertices /= np.max(np.abs(mesh.vertices))
             mesh.vertices = .5 * (mesh.vertices + 1.)
-            pts_trans_fn = lambda x: .5 * (x + 1)
+            self.pts_trans_fn = lambda x: .5 * (x + 1)
         elif recenter == 'siren':
             # SIREN's recentering [-1, 1]
             # it may distort geometry, but makes for high sample efficiency
@@ -518,7 +518,7 @@ class Mesh(Dataset):
             mesh.vertices = (mesh.vertices - mesh_min) / (mesh_max - mesh_min)
             mesh.vertices -= 0.5
             mesh.vertices *= 2.
-            pts_trans_fn = lambda x: x * 1.2
+            self.pts_trans_fn = lambda x: x * 1.2
 
         c0, c1 = mesh.vertices.min(0) - 1e-3, mesh.vertices.max(0) + 1e-3
 
@@ -553,7 +553,7 @@ class Mesh(Dataset):
         focal = H * .9
         render_args_lr = [
             ray_rendering.get_rays(H, W, focal, c2w[:3,:4]), self.corners, 
-                R-1, R+1, N_samples, N_samples_2, True, pts_trans_fn]
+                R-1, R+1, N_samples, N_samples_2, True, self.pts_trans_fn]
 
         self.pts_eval = {
             'pts_metrics': test_pts,
