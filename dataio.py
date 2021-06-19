@@ -497,7 +497,7 @@ class Mesh(Dataset):
 
         if recenter == 'fourier':
             # Recenter to [0, 1]
-            pts_range = [0., 1.]
+            self.pts_range = [0., 1.]
             slice_offset = 0.5
             mesh.vertices -= mesh.vertices.mean(0)
             mesh.vertices /= np.max(np.abs(mesh.vertices))
@@ -506,7 +506,7 @@ class Mesh(Dataset):
         elif recenter == 'siren':
             # SIREN's recentering [-1, 1]
             # it may distort geometry, but makes for high sample efficiency
-            pts_range = [-1., 1.]
+            self.pts_range = [-1., 1.]
             slice_offset = 0.13
             mesh.vertices -= mesh.vertices.mean(0)
             if keep_aspect_ratio:
@@ -538,7 +538,7 @@ class Mesh(Dataset):
         test_gt = [torch.from_numpy(self.gt_fn(test)).float() for test in test_pts]
 
         N = 256
-        x_test = np.linspace(*pts_range, N, endpoint=False) * 1.
+        x_test = np.linspace(*self.pts_range, N, endpoint=False) * 1.
         x_test = np.stack(np.meshgrid(*([x_test]*2), indexing='ij'), -1)
         pts_plot = np.concatenate([x_test, slice_offset + np.zeros_like(x_test[...,0:1])], -1)
         gt_plot = self.gt_fn(pts_plot)

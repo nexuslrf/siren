@@ -31,8 +31,7 @@ p.add_argument('--points_per_batch', type=int, default=32768)
 
 p.add_argument('--model_type', type=str, default='sine',
                help='Options are "sine" (all sine activations) and "mixed" (first layer sine, other layers tanh)')
-p.add_argument('--mesh_path', type=str, default='/home/sitzmann/data/point_cloud.xyz',
-               help='Options are "sine" (all sine activations) and "mixed" (first layer sine, other layers tanh)')
+p.add_argument('--mesh_path', type=str, default='data/Armadillo.ply')
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
 p.add_argument('--split_mlp', action='store_true')
@@ -41,13 +40,14 @@ p.add_argument('--act_scale', type=float, default=1)
 p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
 p.add_argument('--fusion_before_act', action='store_true')
 p.add_argument('--split_train', action='store_true')
-p.add_argument('--test_dim', type=int, default=512)
+p.add_argument('--resolution', type=int, default=256)
 p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fourier')
 p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
 p.add_argument('--use_atten', action='store_true')
 p.add_argument('--rbatches', type=int, default=32)
 p.add_argument('--test_mode', type=str, choices=['volrend', 'mcube'], default='volrend')
 p.add_argument('--fine_pass', action='store_true')
+p.add_argument('--split_accel', action='store_true')
 opt = p.parse_args()
 
 mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter, split_coord=opt.split_train)
@@ -68,6 +68,12 @@ model.cuda()
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 print("load model!")
 if opt.test_mode == 'volrend':
+    if opt.split_accel:
+        assert opt.split_mlp
+        render_fn = lambda m,d,b,r,a: vol_render_split(m,d,b,r,a,resolution=opt.resolution)
+    else:
+        render_fn = lambda m,d,b,r,a: vol_render(m,d,b,r,a)
+
     R = 2.
     c2w = pose_spherical(90. + 10 + 45, -30., R)
     N_samples = 256
@@ -78,17 +84,7 @@ if opt.test_mode == 'volrend':
     rays = get_rays(H, W, focal, c2w[:3,:4])
     render_args_hr = [mesh_dataset.corners, R-1, R+1, N_samples, N_samples_2,
                         True, mesh_dataset.pts_trans_fn, opt.fine_pass]
-    rbatch, r_left = H // opt.rbatches, H % opt.rbatches
-    rets = []
-    for i in tqdm(range(0, H, rbatch)):
-        rets.append(
-            render_rays(model, mesh_dataset, rays[:,i:i+rbatch], *render_args_hr)
-        )
-    if r_left: 
-        rets.append(
-            render_rays(model, mesh_dataset, rays[:,i+rbatch:], *render_args_hr)
-        )
-    depth_map, acc_map = [torch.cat([r[i] for r in rets], 0) for i in range(2)]
+    depth_map, acc_map = render_fn(model, mesh_dataset, opt.rbatches, rays, render_args_hr)
     norm_map = ((make_normals(rays, depth_map) * .5 + .5) * 255).cpu().numpy().astype(np.uint8)
     img_path = os.path.join(root_path, f"norm_map_{H}.png")
     imageio.imsave(img_path, norm_map)
@@ -97,7 +93,7 @@ if opt.test_mode == 'volrend':
 elif opt.test_mode == 'mcube':
     c0, c1 = (torch.as_tensor(c) for c in mesh_dataset.corners)
     th = 0.
-    N_samples = 256
+    N_samples = opt.resolution
     pts = torch.stack(torch.meshgrid(*([torch.linspace(0.,1.,N_samples)]*3))[::-1], -1)
     pts_sh = pts.shape
     pts_flat = pts.reshape(-1, 3)
