@@ -44,6 +44,7 @@ p.add_argument('--resolution', type=int, default=256)
 p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fourier')
 p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
 p.add_argument('--use_atten', action='store_true')
+p.add_argument('--rbatch', type=int, default=0)
 p.add_argument('--rbatches', type=int, default=32)
 p.add_argument('--test_mode', type=str, choices=['volrend', 'mcube'], default='volrend')
 p.add_argument('--fine_pass', action='store_true')
@@ -82,9 +83,10 @@ if opt.test_mode == 'volrend':
     W = H
     focal = H * .9
     rays = get_rays(H, W, focal, c2w[:3,:4])
+    rbatch = H // opt.rbatches if opt.rbatch == 0 else opt.rbatch
     render_args_hr = [mesh_dataset.corners, R-1, R+1, N_samples, N_samples_2,
                         True, mesh_dataset.pts_trans_fn, opt.fine_pass]
-    depth_map, acc_map = render_fn(model, mesh_dataset, opt.rbatches, rays, render_args_hr)
+    depth_map, acc_map = render_fn(model, mesh_dataset, rbatch, rays, render_args_hr)
     norm_map = ((make_normals(rays, depth_map) * .5 + .5) * 255).cpu().numpy().astype(np.uint8)
     img_path = os.path.join(root_path, f"norm_map_{H}.png")
     imageio.imsave(img_path, norm_map)
@@ -98,13 +100,11 @@ elif opt.test_mode == 'mcube':
     pts_sh = pts.shape
     pts_flat = pts.reshape(-1, 3)
     num_pts = pts_flat.shape[0]
-    rbatch, r_left = num_pts // opt.rbatches, num_pts % opt.rbatches
+    rbatch = num_pts // opt.rbatches if opt.rbatch == 0 else opt.rbatch
     rets = []
     with torch.no_grad():
         for i in tqdm(range(0, num_pts, rbatch)):
             rets.append(model({'coords': pts_flat[i:i+rbatch,:].cuda()})['model_out'])
-        if r_left: 
-            rets.append(model({'coords': pts_flat[i+rbatch:,:].cuda()})['model_out'])
     alpha = torch.cat(rets, 0).reshape(*pts_sh[:-1]).cpu()
     mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
     alpha = torch.where(mask, torch.FloatTensor([0.]), alpha)

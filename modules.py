@@ -294,15 +294,15 @@ class SplitFCBlock(MetaModule):
         In this case, data dimension needs to be predefine. E.g.,
             X: [1,128,1], Y: [64,1,1] --> [64,128,1]
         '''
-        if not isinstance(hs, torch.Tensor):
-            h = hs[0]
-            for hi in hs[1:]:
-                if self.fusion_operator == 'sum':
-                    h = h + hi
-                elif self.fusion_operator == 'prod':
-                    h = h * hi
-        else:
-            h = hs
+        # if not isinstance(hs, torch.Tensor):
+        h = hs[0]
+        for hi in hs[1:]:
+            if self.fusion_operator == 'sum':
+                h = h + hi
+            elif self.fusion_operator == 'prod':
+                h = h * hi
+        # else:
+        #     h = hs
         if self.fusion_before_act:
             h = self.net[self.approx_layers-1][1](h)
         if self.approx_layers == self.num_hidden_layers + 1:

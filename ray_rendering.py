@@ -42,17 +42,12 @@ def pose_spherical(theta, phi, radius):
     # c2w = np.array([[-1,0,0,0],[0,0,1,0],[0,1,0,0],[0,0,0,1]]) @ c2w
     return c2w
 
-def vol_render(model, mesh_dataset, rbatches, rays, render_args):
+def vol_render(model, mesh_dataset, rbatch, rays, render_args):
     H = rays.shape[0]
-    rbatch, r_left = H // rbatches, H % rbatches
     rets = []
     for i in tqdm(range(0, H, rbatch)):
         rets.append(
             render_rays(model, mesh_dataset, rays[:,i:i+rbatch], *render_args)
-        )
-    if r_left: 
-        rets.append(
-            render_rays(model, mesh_dataset, rays[:,i+rbatch:], *render_args)
         )
     depth_map, acc_map = [torch.cat([r[i] for r in rets], 0) for i in range(2)]
     return depth_map, acc_map
@@ -129,19 +124,28 @@ def render_mesh_normals(mesh, rays):
     pic = np.reshape(pic, rays.shape[1:])
     return pic
 
-def get_bins(pts, resolution, vmin, vmax):
-    if pts.numel() < resolution: return pts
-    low_bnd = pts.min().clamp_min(-vmin)
-    high_bnd = pts.max().clamp_max(vmax)
-    return torch.linspace(low_bnd, high_bnd, resolution+1) # including two end point.
+def get_bins(pts, resolution, vmin, vmax, eps=1e-5):
+    lbnd = pts.min().clamp_min(vmin)
+    ubnd = pts.max().clamp_max(vmax)
+    bins = torch.linspace(lbnd, ubnd+eps, resolution+1) # including two end point.
+    dstep = (ubnd + eps - lbnd) / resolution
+    return bins, dstep, lbnd, ubnd
 
-def get_coord_feat(model, coord, ch_id):
+def get_pts_pred(model, pts_idx, feats, dsteps, pts):
+    lbnd_idx = pts_idx.long()
+    ubnd_idx = lbnd_idx + 1
+    r = pts_idx - lbnd_idx
+    # indexing feats
+    lbnd_feats = torch.stack([feats[i][lbnd_idx[...,i]] for i in range(3)])
+    ubnd_feats = torch.stack([feats[i][ubnd_idx[...,i]] for i in range(3)])
+    # interpolation
+    pts_feats = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
     with torch.no_grad():
-        out = model.forward_split_channel(coord.cuda(), ch_id)
+        out = model.forward_split_fusion(pts_feats)
     return out
 
 # TODO vol_render function with splitting acceleration
-def vol_render_split(model, mesh, rbatches, rays, render_args, fine_pass=False, resolution=256):
+def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, resolution=256):
 
     corners, near, far, N_samples, N_samples_2, clip, pts_trans_fn = render_args[:7]
     if len(render_args) > 7: fine_pass = render_args[7]
@@ -155,13 +159,59 @@ def vol_render_split(model, mesh, rbatches, rays, render_args, fine_pass=False, 
     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
     pts = pts_trans_fn(pts)
 
-    bins = [get_bins(pts[...,i], resolution, c0[i], c1[i]) for i in range(3)]
-    feats = [get_coord_feat(model, b[...,None], i) for i,b in enumerate(bins)]
+    bins, dsteps = [], []
+    vmins, vmaxs = [], []
+    for i in range(3):
+        bin,dstep,vmin,vmax = get_bins(pts[...,i], resolution, c0[i], c1[i])
+        dsteps.append(dstep)
+        vmins.append(vmin); vmaxs.append(vmax)
+        bins.append(bin)
+    dsteps = torch.stack(dsteps)
+    vmins, vmaxs = torch.stack(vmins), torch.stack(vmaxs)
+    with torch.no_grad():
+        feats = [model.forward_split_channel(b[...,None].cuda(), i) for i,b in enumerate(bins)]
 
+    pts_idx = (pts - vmins) / dsteps
+    # pts within the training bounds
+    mask = ~torch.logical_or(torch.any(pts < vmins, -1), torch.any(pts > vmaxs, -1))
+    pts_infer_idx = pts_idx[mask] # [P_nz, 3]
+    num_pts_infer = pts_infer_idx.shape[0]
+    # TODO consider `rbatch` later.
+    # TODO consider special property of `y_w` later.
+    pts_infer = pts[mask]
 
+    rets = []
+    for i in tqdm(range(0, num_pts_infer, rbatch)):
+        pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
+        rets.append(get_pts_pred(model, pts_idx_chunk,feats,dsteps,pts_infer[i:i+rbatch,:]))
+    rets = torch.cat(rets, 0).sigmoid().squeeze()
 
+    # pts_infer = pts[mask]
+    # rets2 = []
+    # for i in tqdm(range(0, num_pts_infer, rbatch)):
+    #     with torch.no_grad():
+    #         rets2.append(model({'coords': pts_infer[i:i+rbatch, :]})['model_out'])
+    # rets2 = torch.cat(rets2, 0).sigmoid().squeeze()
+    # # rets = rets2
 
+    mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
+
+    alpha = torch.zeros(pts.shape[:-1]).cuda().reshape(-1)\
+        .scatter(0,mask_idx,rets).reshape(pts.shape[:-1])
+
+    # alpha2 = torch.zeros(pts.shape[:-1]).cuda()
+    # alpha2[mask] = rets
+
+    alpha = (alpha > th).float()
+
+    trans = 1.-alpha + 1e-10
+    trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
+    weights = alpha * torch.cumprod(trans, -1)
     
+    depth_map = torch.sum(weights * z_vals, -1) 
+    acc_map = torch.sum(weights, -1)
+    return depth_map, acc_map
+
     # Run network
     # with torch.no_grad():
     #     alpha = model({'coords': pts})['model_out'].sigmoid().squeeze(-1)
