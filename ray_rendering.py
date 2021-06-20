@@ -184,7 +184,7 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     for i in tqdm(range(0, num_pts_infer, rbatch)):
         pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
         rets.append(get_pts_pred(model, pts_idx_chunk,feats,dsteps,pts_infer[i:i+rbatch,:]))
-    rets = torch.cat(rets, 0).sigmoid().squeeze()
+    alpha = torch.cat(rets, 0).sigmoid().squeeze()
 
     # pts_infer = pts[mask]
     # rets2 = []
@@ -192,22 +192,23 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     #     with torch.no_grad():
     #         rets2.append(model({'coords': pts_infer[i:i+rbatch, :]})['model_out'])
     # rets2 = torch.cat(rets2, 0).sigmoid().squeeze()
-    # # rets = rets2
+    # rets = rets2
 
-    mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
-
-    alpha = torch.zeros(pts.shape[:-1]).cuda().reshape(-1)\
-        .scatter(0,mask_idx,rets).reshape(pts.shape[:-1])
-
-    # alpha2 = torch.zeros(pts.shape[:-1]).cuda()
-    # alpha2[mask] = rets
 
     alpha = (alpha > th).float()
+    trans = 1.-alpha
 
-    trans = 1.-alpha + 1e-10
+    mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
+    trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
+        .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
+
+    # trans2 = torch.ones(pts.shape[:-1]).cuda()
+    # trans2[mask] = rets
+    # trans2 = trans +  1e-10
+
+    # TODO less efficient implementation!
     trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
     weights = alpha * torch.cumprod(trans, -1)
-    
     depth_map = torch.sum(weights * z_vals, -1) 
     acc_map = torch.sum(weights, -1)
     return depth_map, acc_map
