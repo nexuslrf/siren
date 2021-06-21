@@ -144,7 +144,7 @@ def get_pts_pred(model, pts_idx, feats):
         out = model.forward_split_fusion(pts_feats)
     return out
 
-# TODO vol_render function with splitting acceleration
+# vol_render function with splitting acceleration
 def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, resolution=256):
 
     corners, near, far, N_samples, N_samples_2, clip, pts_trans_fn = render_args[:7]
@@ -176,7 +176,7 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     mask = ~torch.logical_or(torch.any(pts < vmins, -1), torch.any(pts > vmaxs, -1))
     pts_infer_idx = pts_idx[mask] # [P_nz, 3]
     num_pts_infer = pts_infer_idx.shape[0]
-    # TODO consider `rbatch` later.
+
     # TODO consider special property of `y_w` later.
     pts_infer = pts[mask]
 
@@ -185,14 +185,6 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
         pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
         rets.append(get_pts_pred(model, pts_idx_chunk,feats))
     alpha = torch.cat(rets, 0).sigmoid().squeeze()
-
-    # pts_infer = pts[mask]
-    # rets2 = []
-    # for i in tqdm(range(0, num_pts_infer, rbatch)):
-    #     with torch.no_grad():
-    #         rets2.append(model({'coords': pts_infer[i:i+rbatch, :]})['model_out'])
-    # rets2 = torch.cat(rets2, 0).sigmoid().squeeze()
-    # rets = rets2
 
     ############
     # A faster implementation
@@ -240,6 +232,15 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
         depth = z_vals[torch.arange(z_vals.shape[0]), w_id]
 
     return depth_map, acc_map
+
+        #### For comparison test ###
+        # pts_infer = pts[mask]
+        # rets2 = []
+        # for i in tqdm(range(0, num_pts_infer, rbatch)):
+        #     with torch.no_grad():
+        #         rets2.append(model({'coords': pts_infer[i:i+rbatch, :]})['model_out'])
+        # rets2 = torch.cat(rets2, 0).sigmoid().squeeze()
+        # rets = rets2
     
         ###### Without using mask in fine pass ########
         # pts_idx = pts_idx.reshape(-1,3).clamp(0,resolution+1-1e-10)
@@ -271,7 +272,7 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     # # trans2[mask] = rets
     # # trans2 = trans +  1e-10
 
-    # # TODO less efficient implementation!
+    # # less efficient implementation!
     # trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
     # weights = alpha * torch.cumprod(trans, -1)
     # # ⬆️ this step is to find the position of first alpha=1 along each ray.
