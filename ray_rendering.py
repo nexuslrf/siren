@@ -194,10 +194,24 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     # rets2 = torch.cat(rets2, 0).sigmoid().squeeze()
     # rets = rets2
 
+    ############
+    # A faster implementation
+    alpha = (alpha > th)
+    m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
+    a_nz_idx = alpha.nonzero(as_tuple=True)[0]
+    r_id = m_idx[0][a_nz_idx]
+    w_id = m_idx[1][a_nz_idx]
+    n_id = (r_id - torch.cat([torch.IntTensor([0]).cuda(), r_id[:-1]])).nonzero(as_tuple=True)[0]
+    r_id = r_id[n_id]
+    w_id = w_id[n_id]
+    depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
+        .scatter(0,r_id,z_vals[w_id]).reshape(rays_o.shape[:-1])
+    acc_map = (depth_map > 0).float()
+    return depth_map, acc_map
+    ############
 
     alpha = (alpha > th).float()
     trans = 1.-alpha
-
     mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
     trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
         .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
@@ -209,6 +223,7 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     # TODO less efficient implementation!
     trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
     weights = alpha * torch.cumprod(trans, -1)
+    # ⬆️ this step is to find the position of first alpha=1 along each ray.
     depth_map = torch.sum(weights * z_vals, -1) 
     acc_map = torch.sum(weights, -1)
     return depth_map, acc_map
