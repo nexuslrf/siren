@@ -131,7 +131,7 @@ def get_bins(pts, resolution, vmin, vmax, eps=1e-5):
     dstep = (ubnd + eps - lbnd) / resolution
     return bins, dstep, lbnd, ubnd
 
-def get_pts_pred(model, pts_idx, feats, dsteps, pts):
+def get_pts_pred(model, pts_idx, feats):
     lbnd_idx = pts_idx.long()
     ubnd_idx = lbnd_idx + 1
     r = pts_idx - lbnd_idx
@@ -183,7 +183,7 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     rets = []
     for i in tqdm(range(0, num_pts_infer, rbatch)):
         pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
-        rets.append(get_pts_pred(model, pts_idx_chunk,feats,dsteps,pts_infer[i:i+rbatch,:]))
+        rets.append(get_pts_pred(model, pts_idx_chunk,feats))
     alpha = torch.cat(rets, 0).sigmoid().squeeze()
 
     # pts_infer = pts[mask]
@@ -199,71 +199,82 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     alpha = (alpha > th)
     m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
     a_nz_idx = alpha.nonzero(as_tuple=True)[0]
-    r_id = m_idx[0][a_nz_idx]
+    h_id = m_idx[0][a_nz_idx] + 1 # to avoid the first idx is 0
     w_id = m_idx[1][a_nz_idx]
-    n_id = (r_id - torch.cat([torch.IntTensor([0]).cuda(), r_id[:-1]])).nonzero(as_tuple=True)[0]
-    r_id = r_id[n_id]
+    n_id = (h_id - torch.cat([torch.IntTensor([0]).cuda(), h_id[:-1]])).nonzero(as_tuple=True)[0]
+    r_id = h_id[n_id] - 1
     w_id = w_id[n_id]
+    depth = z_vals[w_id]
     depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
-        .scatter(0,r_id,z_vals[w_id]).reshape(rays_o.shape[:-1])
+        .scatter(0,r_id,depth).reshape(rays_o.shape[:-1])
     acc_map = (depth_map > 0).float()
-    return depth_map, acc_map
     ############
+    
+    # second level sampling
+    if fine_pass:
+        z_vals = torch.linspace(-1., 1., N_samples_2).cuda() * .01 + depth[...,None]
+        pts = rays_o.reshape(-1,3)[r_id][...,None,:] + \
+            rays_d.reshape(-1,3)[r_id][...,None,:] * z_vals[...,:,None]
+        pts = pts_trans_fn(pts) # [R, N, 3]
+        pts_idx = ((pts - vmins) / dsteps) #.reshape(-1,3) #.clamp(0,resolution+1-1e-10)
+        
+        mask = ~torch.logical_or(torch.any(pts < vmins, -1), torch.any(pts > vmaxs, -1))
+        pts_infer_idx = pts_idx[mask] # [P_nz, 3]
 
-    alpha = (alpha > th).float()
-    trans = 1.-alpha
-    mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
-    trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
-        .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
+        num_pts_infer = pts_infer_idx.shape[0]
 
-    # trans2 = torch.ones(pts.shape[:-1]).cuda()
-    # trans2[mask] = rets
-    # trans2 = trans +  1e-10
+        rets = []
+        for i in tqdm(range(0, num_pts_infer, rbatch)):
+            pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
+            rets.append(get_pts_pred(model, pts_idx_chunk,feats))
+        alpha = torch.cat(rets, 0).sigmoid().squeeze()
 
-    # TODO less efficient implementation!
-    trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
-    weights = alpha * torch.cumprod(trans, -1)
-    # ⬆️ this step is to find the position of first alpha=1 along each ray.
-    depth_map = torch.sum(weights * z_vals, -1) 
-    acc_map = torch.sum(weights, -1)
+
+        alpha = (alpha > th)
+        m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
+        a_nz_idx = alpha.nonzero(as_tuple=True)[0]
+        h_id = m_idx[0][a_nz_idx] + 1
+        w_id = m_idx[1][a_nz_idx]
+        n_id = (h_id - torch.cat([torch.IntTensor([0]).cuda(), h_id[:-1]])).nonzero(as_tuple=True)[0]
+        w_id = w_id[n_id]
+        depth = z_vals[torch.arange(z_vals.shape[0]), w_id]
+
     return depth_map, acc_map
+    
+        ###### Without using mask in fine pass ########
+        # pts_idx = pts_idx.reshape(-1,3).clamp(0,resolution+1-1e-10)
+        # num_pts_infer = pts_idx.shape[0]
+        # rets_ = []
+        # for i in tqdm(range(0, num_pts_infer, rbatch)):
+        #     pts_idx_chunk = pts_idx[i:i+rbatch, :]
+        #     rets_.append(get_pts_pred(model, pts_idx_chunk,feats))
+        # alpha_ = torch.cat(rets_, 0).sigmoid().squeeze()
 
-    # Run network
-    # with torch.no_grad():
-    #     alpha = model({'coords': pts})['model_out'].sigmoid().squeeze(-1)
-    # if clip:
-    #     mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
-    #     alpha = torch.where(mask, torch.FloatTensor([0.]).cuda(), alpha)
+        # alpha_ = (alpha_ > th)
+        # h_id_, w_id_ = alpha_.reshape(pts.shape[:-1]).nonzero(as_tuple=True)
+        # h_id_ = h_id_ + 1
+        # n_id_ = (h_id_ - torch.cat([torch.IntTensor([0]).cuda(), h_id_[:-1]])).nonzero(as_tuple=True)[0]
+        
+        # depth_ = z_vals[torch.arange(z_vals.shape[0]), w_id_[n_id_]] 
 
+        # depth_map = depth_map.reshape(-1).scatter(0,r_id,depth_).reshape(rays_o.shape[:-1])
+        # acc_map = (depth_map > 0).float()
+    
+    ###### First ver. ######
     # alpha = (alpha > th).float()
+    # trans = 1.-alpha
+    # mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
+    # trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
+    #     .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
 
-    # trans = 1.-alpha + 1e-10
+    # # trans2 = torch.ones(pts.shape[:-1]).cuda()
+    # # trans2[mask] = rets
+    # # trans2 = trans +  1e-10
+
+    # # TODO less efficient implementation!
     # trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
     # weights = alpha * torch.cumprod(trans, -1)
-    
+    # # ⬆️ this step is to find the position of first alpha=1 along each ray.
     # depth_map = torch.sum(weights * z_vals, -1) 
     # acc_map = torch.sum(weights, -1)
-
-    # if fine_pass:
-    #     # Second pass to refine isosurface
-    #     z_vals = torch.linspace(-1., 1., N_samples_2).cuda() * .01 + depth_map[...,None]
-    #     pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
-    #     pts = pts_trans_fn(pts)
-    #     # Run network
-    #     with torch.no_grad():
-    #         alpha = model({'coords': pts.cuda()})['model_out'].sigmoid().squeeze(-1)
-    #     if clip:
-    #         # alpha = np.where(np.any(np.abs(pts) > 1, -1), 0., alpha)
-    #         mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
-    #         alpha = torch.where(mask, torch.FloatTensor([0.]).cuda(), alpha)
-
-    #     alpha = (alpha > th).float()
-
-    #     trans = 1.-alpha + 1e-10
-    #     trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
-    #     weights = alpha * torch.cumprod(trans, -1)
-        
-    #     depth_map = torch.sum(weights * z_vals, -1) 
-    #     acc_map = torch.sum(weights, -1)
-
     # return depth_map, acc_map
