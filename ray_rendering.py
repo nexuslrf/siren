@@ -43,7 +43,7 @@ def pose_spherical(theta, phi, radius):
     return c2w
 
 def vol_render(model, mesh_dataset, rbatch, rays, render_args):
-    H = rays.shape[0]
+    H = rays.shape[1]
     rets = []
     for i in tqdm(range(0, H, rbatch)):
         rets.append(
