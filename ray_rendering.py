@@ -178,7 +178,7 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     num_pts_infer = pts_infer_idx.shape[0]
 
     # TODO consider special property of `y_w` later.
-    pts_infer = pts[mask]
+    # pts_infer = pts[mask]
 
     rets = []
     for i in tqdm(range(0, num_pts_infer, rbatch)):
