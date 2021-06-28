@@ -45,6 +45,7 @@ p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fo
 p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
 p.add_argument('--use_atten', action='store_true')
 p.add_argument('--rbatch', type=int, default=0)
+p.add_argument('--grid_batch', type=int, default=16)
 p.add_argument('--rbatches', type=int, default=32)
 p.add_argument('--test_mode', type=str, choices=['volrend', 'mcube'], default='volrend')
 p.add_argument('--fine_pass', action='store_true')
@@ -73,7 +74,7 @@ if opt.test_mode == 'volrend':
         assert opt.split_mlp
         render_fn = lambda m,d,b,r,a: vol_render_split(m,d,b,r,a,resolution=opt.resolution)
     else:
-        render_fn = lambda m,d,b,r,a: vol_render_nosplit(m,d,b,r,a, resolution=opt.resolution)
+        render_fn = lambda m,d,b,r,a: vol_render_nosplit(m,d,b,r,a, resolution=opt.resolution, grid_batch=opt.grid_batch)
 
     R = 2.
     c2w = pose_spherical(90. + 10 + 45, -30., R)

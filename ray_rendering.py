@@ -43,7 +43,7 @@ def pose_spherical(theta, phi, radius):
     return c2w
 
 def vol_render(model, mesh_dataset, rbatch, rays, render_args):
-    H = rays.shape[0]
+    H = rays.shape[1]
     rets = []
     for i in tqdm(range(0, H, rbatch)):
         rets.append(
@@ -131,7 +131,7 @@ def get_bins(pts, resolution, vmin, vmax, eps=1e-5):
     dstep = (ubnd + eps - lbnd) / resolution
     return bins, dstep, lbnd, ubnd
 
-def get_pts_pred(model, pts_idx, feats, dsteps, pts, split=True, resolution=128):
+def get_pts_pred(model, pts_idx, feats, split=True, resolution=128):
     lbnd_idx = pts_idx.long()
     if split:
         ubnd_idx = lbnd_idx + 1
@@ -194,7 +194,7 @@ def get_pts_pred(model, pts_idx, feats, dsteps, pts, split=True, resolution=128)
         out = pts_feats
     return out
 
-# TODO vol_render function with splitting acceleration
+# vol_render function with splitting acceleration
 def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, resolution=256):
 
     corners, near, far, N_samples, N_samples_2, clip, pts_trans_fn = render_args[:7]
@@ -226,24 +226,18 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     mask = ~torch.logical_or(torch.any(pts < vmins, -1), torch.any(pts > vmaxs, -1))
     pts_infer_idx = pts_idx[mask] # [P_nz, 3]
     num_pts_infer = pts_infer_idx.shape[0]
-    # TODO consider `rbatch` later.
+
     # TODO consider special property of `y_w` later.
-    pts_infer = pts[mask]
+    # pts_infer = pts[mask]
 
     rets = []
     for i in tqdm(range(0, num_pts_infer, rbatch)):
         pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
-        rets.append(get_pts_pred(model, pts_idx_chunk,feats,dsteps,pts_infer[i:i+rbatch,:]))
+        rets.append(get_pts_pred(model, pts_idx_chunk,feats))
     alpha = torch.cat(rets, 0).sigmoid().squeeze()
 
-    # pts_infer = pts[mask]
-    # rets2 = []
-    # for i in tqdm(range(0, num_pts_infer, rbatch)):
-    #     with torch.no_grad():
-    #         rets2.append(model({'coords': pts_infer[i:i+rbatch, :]})['model_out'])
-    # rets2 = torch.cat(rets2, 0).sigmoid().squeeze()
-    # rets = rets2
-
+    ############
+    # A faster implementation
     alpha = (alpha > th)
     m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
     a_nz_idx = alpha.nonzero(as_tuple=True)[0]
@@ -256,11 +250,70 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
         .scatter(0,r_id,depth).reshape(rays_o.shape[:-1])
     acc_map = (depth_map > 0).float()
+    ############
+    
+    # second level sampling
+    if fine_pass:
+        z_vals = torch.linspace(-1., 1., N_samples_2).cuda() * .01 + depth[...,None]
+        pts = rays_o.reshape(-1,3)[r_id][...,None,:] + \
+            rays_d.reshape(-1,3)[r_id][...,None,:] * z_vals[...,:,None]
+        pts = pts_trans_fn(pts) # [R, N, 3]
+        pts_idx = ((pts - vmins) / dsteps) #.reshape(-1,3) #.clamp(0,resolution+1-1e-10)
+        
+        mask = ~torch.logical_or(torch.any(pts < vmins, -1), torch.any(pts > vmaxs, -1))
+        pts_infer_idx = pts_idx[mask] # [P_nz, 3]
+
+        num_pts_infer = pts_infer_idx.shape[0]
+
+        rets = []
+        for i in tqdm(range(0, num_pts_infer, rbatch)):
+            pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
+            rets.append(get_pts_pred(model, pts_idx_chunk,feats))
+        alpha = torch.cat(rets, 0).sigmoid().squeeze()
 
 
+        alpha = (alpha > th)
+        m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
+        a_nz_idx = alpha.nonzero(as_tuple=True)[0]
+        h_id = m_idx[0][a_nz_idx] + 1
+        w_id = m_idx[1][a_nz_idx]
+        n_id = (h_id - torch.cat([torch.IntTensor([0]).cuda(), h_id[:-1]])).nonzero(as_tuple=True)[0]
+        w_id = w_id[n_id]
+        depth = z_vals[torch.arange(z_vals.shape[0]), w_id]
+
+    return depth_map, acc_map
+
+        #### For comparison test ###
+        # pts_infer = pts[mask]
+        # rets2 = []
+        # for i in tqdm(range(0, num_pts_infer, rbatch)):
+        #     with torch.no_grad():
+        #         rets2.append(model({'coords': pts_infer[i:i+rbatch, :]})['model_out'])
+        # rets2 = torch.cat(rets2, 0).sigmoid().squeeze()
+        # rets = rets2
+    
+        ###### Without using mask in fine pass ########
+        # pts_idx = pts_idx.reshape(-1,3).clamp(0,resolution+1-1e-10)
+        # num_pts_infer = pts_idx.shape[0]
+        # rets_ = []
+        # for i in tqdm(range(0, num_pts_infer, rbatch)):
+        #     pts_idx_chunk = pts_idx[i:i+rbatch, :]
+        #     rets_.append(get_pts_pred(model, pts_idx_chunk,feats))
+        # alpha_ = torch.cat(rets_, 0).sigmoid().squeeze()
+
+        # alpha_ = (alpha_ > th)
+        # h_id_, w_id_ = alpha_.reshape(pts.shape[:-1]).nonzero(as_tuple=True)
+        # h_id_ = h_id_ + 1
+        # n_id_ = (h_id_ - torch.cat([torch.IntTensor([0]).cuda(), h_id_[:-1]])).nonzero(as_tuple=True)[0]
+        
+        # depth_ = z_vals[torch.arange(z_vals.shape[0]), w_id_[n_id_]] 
+
+        # depth_map = depth_map.reshape(-1).scatter(0,r_id,depth_).reshape(rays_o.shape[:-1])
+        # acc_map = (depth_map > 0).float()
+    
+    ###### First ver. ######
     # alpha = (alpha > th).float()
     # trans = 1.-alpha
-
     # mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
     # trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
     #     .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
@@ -269,27 +322,10 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     # # trans2[mask] = rets
     # # trans2 = trans +  1e-10
 
-    # # TODO less efficient implementation!
-    # trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)
-    # print(trans.shape)  
-    # weights = alpha * torch.cumprod(trans, -1)
-    # depth_map = torch.sum(weights * z_vals, -1) 
-    # acc_map = torch.sum(weights, -1)
-    # return depth_map, acc_map
-
-    # Run network
-    # with torch.no_grad():
-    #     alpha = model({'coords': pts})['model_out'].sigmoid().squeeze(-1)
-    # if clip:
-    #     mask = torch.logical_or(torch.any(pts < c0, -1), torch.any(pts > c1, -1))
-    #     alpha = torch.where(mask, torch.FloatTensor([0.]).cuda(), alpha)
-
-    # alpha = (alpha > th).float()
-
-    # trans = 1.-alpha + 1e-10
+    # # less efficient implementation!
     # trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
     # weights = alpha * torch.cumprod(trans, -1)
-    
+    # # ⬆️ this step is to find the position of first alpha=1 along each ray.
     # depth_map = torch.sum(weights * z_vals, -1) 
     # acc_map = torch.sum(weights, -1)
 
@@ -359,23 +395,9 @@ def vol_render_nosplit(model, mesh, rbatch, rays, render_args, fine_pass=False, 
     rets = []
     for i in tqdm(range(0, num_pts_infer, rbatch)):
         pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
-        rets.append(get_pts_pred(model, pts_idx_chunk,feats,dsteps,pts_infer[i:i+rbatch,:], split=False, resolution=resolution))
+        rets.append(get_pts_pred(model, pts_idx_chunk,feats, split=False, resolution=resolution))
     alpha = torch.cat(rets, 0).sigmoid().squeeze()
 
-
-
-    # alpha = (alpha > th).float()
-    # trans = 1.-alpha
-
-    # mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
-    # trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
-    #     .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
-    # print(trans.shape)
-
-    # trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
-    # weights = alpha * torch.cumprod(trans, -1)
-    # depth_map = torch.sum(weights * z_vals, -1) 
-    # acc_map = torch.sum(weights, -1)
     alpha = (alpha > th)
     m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
     a_nz_idx = alpha.nonzero(as_tuple=True)[0]
@@ -388,4 +410,37 @@ def vol_render_nosplit(model, mesh, rbatch, rays, render_args, fine_pass=False, 
     depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
         .scatter(0,r_id,depth).reshape(rays_o.shape[:-1])
     acc_map = (depth_map > 0).float()
+
+    if fine_pass:
+        z_vals = torch.linspace(near, far, N_samples).cuda()
+        pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
+        pts = pts_trans_fn(pts)
+        pts_idx = ((pts - vmins) / dsteps) #.reshape(-1,3) #.clamp(0,resolution+1-1e-10)
+        
+        mask = ~torch.logical_or(torch.any(pts < vmins, -1), torch.any(pts > vmaxs, -1))
+        pts_infer_idx = pts_idx[mask] # [P_nz, 3]
+        num_pts_infer = pts_infer_idx.shape[0]
+
+        pts_infer = pts[mask]
+
+        rets = []
+        for i in tqdm(range(0, num_pts_infer, rbatch)):
+            pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
+            rets.append(get_pts_pred(model, pts_idx_chunk,feats, split=False, resolution=resolution))
+        alpha = torch.cat(rets, 0).sigmoid().squeeze()
+
+        alpha = (alpha > th)
+        m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
+        a_nz_idx = alpha.nonzero(as_tuple=True)[0]
+        h_id = m_idx[0][a_nz_idx] + 1 # to avoid the first idx is 0
+        w_id = m_idx[1][a_nz_idx]
+        n_id = (h_id - torch.cat([torch.IntTensor([0]).cuda(), h_id[:-1]])).nonzero(as_tuple=True)[0]
+        r_id = h_id[n_id] - 1
+        w_id = w_id[n_id]
+        depth = z_vals[w_id]
+        depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
+            .scatter(0,r_id,depth).reshape(rays_o.shape[:-1])
+        acc_map = (depth_map > 0).float()
+
+
     return depth_map, acc_map
