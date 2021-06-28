@@ -73,7 +73,7 @@ if opt.test_mode == 'volrend':
         assert opt.split_mlp
         render_fn = lambda m,d,b,r,a: vol_render_split(m,d,b,r,a,resolution=opt.resolution)
     else:
-        render_fn = lambda m,d,b,r,a: vol_render_nosplit(m,d,b,r,a, resolution=256)
+        render_fn = lambda m,d,b,r,a: vol_render_nosplit(m,d,b,r,a, resolution=opt.resolution)
 
     R = 2.
     c2w = pose_spherical(90. + 10 + 45, -30., R)
