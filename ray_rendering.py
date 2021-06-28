@@ -131,17 +131,67 @@ def get_bins(pts, resolution, vmin, vmax, eps=1e-5):
     dstep = (ubnd + eps - lbnd) / resolution
     return bins, dstep, lbnd, ubnd
 
-def get_pts_pred(model, pts_idx, feats, dsteps, pts):
+def get_pts_pred(model, pts_idx, feats, dsteps, pts, split=True, resolution=128):
     lbnd_idx = pts_idx.long()
-    ubnd_idx = lbnd_idx + 1
-    r = pts_idx - lbnd_idx
-    # indexing feats
-    lbnd_feats = torch.stack([feats[i][lbnd_idx[...,i]] for i in range(3)])
-    ubnd_feats = torch.stack([feats[i][ubnd_idx[...,i]] for i in range(3)])
-    # interpolation
-    pts_feats = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
-    with torch.no_grad():
-        out = model.forward_split_fusion(pts_feats)
+    if split:
+        ubnd_idx = lbnd_idx + 1
+        r = pts_idx - lbnd_idx
+        # indexing feats
+        lbnd_feats = torch.stack([feats[i][lbnd_idx[...,i]] for i in range(3)])
+        ubnd_feats = torch.stack([feats[i][ubnd_idx[...,i]] for i in range(3)])
+        # interpolation
+        pts_feats = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
+        with torch.no_grad():
+            out = model.forward_split_fusion(pts_feats)
+    else:
+        num_bins = resolution + 1
+        r = pts_idx[..., 0] - lbnd_idx[..., 0]
+        # lbnd_idx_mixed = torch.prod(lbnd_idx, dim=-1)
+        # interpolation along x'
+        # y = 0, z = 0
+        ubnd_idx = lbnd_idx + torch.tensor([1, 0, 0]).cuda()
+        lbnd_idx_t = lbnd_idx + torch.tensor([0, 0, 0]).cuda() # for demonstration purpose...
+        lbnd_idx_mixed = lbnd_idx_t[...,0] * num_bins * num_bins + lbnd_idx_t[...,1] * num_bins + lbnd_idx_t[...,2]
+        lbnd_feats = feats[lbnd_idx_mixed]
+        ubnd_idx_mixed = ubnd_idx[...,0] * num_bins * num_bins + ubnd_idx[...,1] * num_bins + ubnd_idx[...,2]
+        ubnd_feats = feats[ubnd_idx_mixed]
+        pts_feats_00 = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
+        # y = 0, z = 1
+        ubnd_idx = lbnd_idx + torch.tensor([1, 0, 1]).cuda()
+        lbnd_idx_t = lbnd_idx + torch.tensor([0, 0, 1]).cuda()
+        lbnd_idx_mixed = lbnd_idx_t[...,0] * num_bins * num_bins + lbnd_idx_t[...,1] * num_bins + lbnd_idx_t[...,2]
+        lbnd_feats = feats[lbnd_idx_mixed]
+        ubnd_idx_mixed = ubnd_idx[...,0] * num_bins * num_bins + ubnd_idx[...,1] * num_bins + ubnd_idx[...,2]
+        ubnd_feats = feats[ubnd_idx_mixed]
+        pts_feats_01 = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
+        # y = 1, z = 0
+        ubnd_idx = lbnd_idx + torch.tensor([1, 1, 0]).cuda()
+        lbnd_idx_t = lbnd_idx + torch.tensor([0, 1, 0]).cuda()
+        lbnd_idx_mixed = lbnd_idx_t[...,0] * num_bins * num_bins + lbnd_idx_t[...,1] * num_bins + lbnd_idx_t[...,2]
+        lbnd_feats = feats[lbnd_idx_mixed]
+        ubnd_idx_mixed = ubnd_idx[...,0] * num_bins * num_bins + ubnd_idx[...,1] * num_bins + ubnd_idx[...,2]
+        ubnd_feats = feats[ubnd_idx_mixed]
+        pts_feats_10 = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
+        # y = 1, z = 1
+        ubnd_idx = lbnd_idx + torch.tensor([1, 1, 1]).cuda()
+        lbnd_idx_t = lbnd_idx + torch.tensor([0, 1, 1]).cuda()
+        lbnd_idx_mixed = lbnd_idx_t[...,0] * num_bins * num_bins + lbnd_idx_t[...,1] * num_bins + lbnd_idx_t[...,2]
+        lbnd_feats = feats[lbnd_idx_mixed]
+        ubnd_idx_mixed = ubnd_idx[...,0] * num_bins * num_bins + ubnd_idx[...,1] * num_bins + ubnd_idx[...,2]
+        ubnd_feats = feats[ubnd_idx_mixed]
+        pts_feats_11 = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
+
+        # interpolation along y
+        r = pts_idx[..., 1] - lbnd_idx[..., 1]
+        # z = 0
+        pts_feats_0 = (pts_feats_00 * (1 - r).T[...,None] + r.T[...,None] * pts_feats_10)
+        # z = 1
+        pts_feats_1 = (pts_feats_01 * (1 - r).T[...,None] + r.T[...,None] * pts_feats_11)
+
+        # interpolation along z
+        r = pts_idx[..., 2] - lbnd_idx[..., 2]
+        pts_feats = (pts_feats_0 * (1 - r).T[...,None] + r.T[...,None] * pts_feats_1)
+        out = pts_feats
     return out
 
 # TODO vol_render function with splitting acceleration
@@ -194,24 +244,38 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     # rets2 = torch.cat(rets2, 0).sigmoid().squeeze()
     # rets = rets2
 
+    alpha = (alpha > th)
+    m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
+    a_nz_idx = alpha.nonzero(as_tuple=True)[0]
+    h_id = m_idx[0][a_nz_idx] + 1 # to avoid the first idx is 0
+    w_id = m_idx[1][a_nz_idx]
+    n_id = (h_id - torch.cat([torch.IntTensor([0]).cuda(), h_id[:-1]])).nonzero(as_tuple=True)[0]
+    r_id = h_id[n_id] - 1
+    w_id = w_id[n_id]
+    depth = z_vals[w_id]
+    depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
+        .scatter(0,r_id,depth).reshape(rays_o.shape[:-1])
+    acc_map = (depth_map > 0).float()
 
-    alpha = (alpha > th).float()
-    trans = 1.-alpha
 
-    mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
-    trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
-        .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
+    # alpha = (alpha > th).float()
+    # trans = 1.-alpha
 
-    # trans2 = torch.ones(pts.shape[:-1]).cuda()
-    # trans2[mask] = rets
-    # trans2 = trans +  1e-10
+    # mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
+    # trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
+    #     .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
 
-    # TODO less efficient implementation!
-    trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
-    weights = alpha * torch.cumprod(trans, -1)
-    depth_map = torch.sum(weights * z_vals, -1) 
-    acc_map = torch.sum(weights, -1)
-    return depth_map, acc_map
+    # # trans2 = torch.ones(pts.shape[:-1]).cuda()
+    # # trans2[mask] = rets
+    # # trans2 = trans +  1e-10
+
+    # # TODO less efficient implementation!
+    # trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)
+    # print(trans.shape)  
+    # weights = alpha * torch.cumprod(trans, -1)
+    # depth_map = torch.sum(weights * z_vals, -1) 
+    # acc_map = torch.sum(weights, -1)
+    # return depth_map, acc_map
 
     # Run network
     # with torch.no_grad():
@@ -251,4 +315,77 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     #     depth_map = torch.sum(weights * z_vals, -1) 
     #     acc_map = torch.sum(weights, -1)
 
-    # return depth_map, acc_map
+    return depth_map, acc_map
+
+def vol_render_nosplit(model, mesh, rbatch, rays, render_args, fine_pass=False, resolution=256, grid_batch=16):
+
+    corners, near, far, N_samples, N_samples_2, clip, pts_trans_fn = render_args[:7]
+    if len(render_args) > 7: fine_pass = render_args[7]
+
+    rays_o, rays_d = rays[0].cuda(), rays[1].cuda()
+    c0, c1 = (torch.as_tensor(c).cuda() for c in corners)
+    th = .5
+    
+    # Compute 3D query points
+    z_vals = torch.linspace(near, far, N_samples).cuda()
+    pts = rays_o[...,None,:] + rays_d[...,None,:] * z_vals[...,:,None]
+    pts = pts_trans_fn(pts)
+
+    bins, dsteps = [], []
+    vmins, vmaxs = [], []
+    for i in range(3):
+        bin,dstep,vmin,vmax = get_bins(pts[...,i], resolution, c0[i], c1[i])
+        dsteps.append(dstep)
+        vmins.append(vmin); vmaxs.append(vmax)
+        bins.append(bin)
+    dsteps = torch.stack(dsteps)
+    vmins, vmaxs = torch.stack(vmins), torch.stack(vmaxs)
+    bins = torch.stack(torch.meshgrid(bins[0], bins[1], bins[2]), axis=-1).view(-1, 3)
+    feats = []
+    g_batch = bins.shape[0] // grid_batch + 1
+    for i in range(grid_batch):
+        with torch.no_grad():
+            input_bin = bins[i*g_batch:(i+1)*g_batch, :].cuda()
+            feats.append(model.forward({"coords":input_bin})['model_out'])
+    feats = torch.cat(feats, dim=0).cuda()
+
+    pts_idx = (pts - vmins) / dsteps
+    mask = ~torch.logical_or(torch.any(pts < vmins, -1), torch.any(pts > vmaxs, -1))
+    pts_infer_idx = pts_idx[mask] # [P_nz, 3]
+    num_pts_infer = pts_infer_idx.shape[0]
+
+    pts_infer = pts[mask]
+
+    rets = []
+    for i in tqdm(range(0, num_pts_infer, rbatch)):
+        pts_idx_chunk = pts_infer_idx[i:i+rbatch, :]
+        rets.append(get_pts_pred(model, pts_idx_chunk,feats,dsteps,pts_infer[i:i+rbatch,:], split=False, resolution=resolution))
+    alpha = torch.cat(rets, 0).sigmoid().squeeze()
+
+
+
+    # alpha = (alpha > th).float()
+    # trans = 1.-alpha
+
+    # mask_idx = mask.reshape(-1).nonzero(as_tuple=True)[0]
+    # trans = torch.ones(pts.shape[:-1]).cuda().reshape(-1)\
+    #     .scatter(0,mask_idx,trans).reshape(pts.shape[:-1]) + 1e-10
+    # print(trans.shape)
+
+    # trans = torch.cat([torch.ones_like(trans[...,:1]).cuda(), trans[...,:-1]], -1)  
+    # weights = alpha * torch.cumprod(trans, -1)
+    # depth_map = torch.sum(weights * z_vals, -1) 
+    # acc_map = torch.sum(weights, -1)
+    alpha = (alpha > th)
+    m_idx = mask.reshape(-1, N_samples).nonzero(as_tuple=True)
+    a_nz_idx = alpha.nonzero(as_tuple=True)[0]
+    h_id = m_idx[0][a_nz_idx] + 1 # to avoid the first idx is 0
+    w_id = m_idx[1][a_nz_idx]
+    n_id = (h_id - torch.cat([torch.IntTensor([0]).cuda(), h_id[:-1]])).nonzero(as_tuple=True)[0]
+    r_id = h_id[n_id] - 1
+    w_id = w_id[n_id]
+    depth = z_vals[w_id]
+    depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
+        .scatter(0,r_id,depth).reshape(rays_o.shape[:-1])
+    acc_map = (depth_map > 0).float()
+    return depth_map, acc_map
