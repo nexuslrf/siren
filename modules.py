@@ -147,9 +147,11 @@ class SplitFCBlock(MetaModule):
         self.use_atten = use_atten
         self.learn_code = learn_code
         if approx_layers != num_hidden_layers + 1:
-            last_layer_features = out_features
+            last_layer_features = 1
         elif last_layer_features < 0:
-            last_layer_features = hidden_features
+            last_layer_features = hidden_features # Channels
+        
+        last_layer_features = last_layer_features * out_features
 
         # Dictionary that maps nonlinearity name to the respective function, initialization, and, if applicable,
         # special first-layer initialization scheme
@@ -246,27 +248,27 @@ class SplitFCBlock(MetaModule):
         # layer before fusion
         if not self.fusion_before_act:
             # for simple fusion strategies
-            h = self.net[self.approx_layers-1](h)
+            hs = self.net[self.approx_layers-1](hs)
             if pos_codes is not None:
-                # h = (h * pos_codes)
-                h = (h + pos_codes)
+                # hs = (hs * pos_codes)
+                hs = (hs + pos_codes)
             if self.fusion_operator == 'sum':
-                h = h.sum(-2)
+                h = hs.sum(-2)
             elif self.fusion_operator == 'prod':
-                h = h.prod(-2)
+                h = hs.prod(-2)
 
             if self.use_atten:
                 h = h * self.atten(coords)
         else:
             # fusion before activation
-            h = self.net[self.approx_layers-1][0](h)
+            hs = self.net[self.approx_layers-1][0](hs)
             if pos_codes is not None:
-                # h = (h * pos_codes)
-                h = (h + pos_codes)
+                # hs = (hs * pos_codes)
+                hs = (hs + pos_codes)
             if self.fusion_operator == 'sum':
-                h = h.sum(-2)
+                h = hs.sum(-2)
             elif self.fusion_operator == 'prod':
-                h = h.prod(-2)
+                h = hs.prod(-2)
             
             if self.use_atten:
                 h = h * self.atten(coords)
@@ -274,7 +276,9 @@ class SplitFCBlock(MetaModule):
         if self.learn_code:
             h = h * self.code
         if self.approx_layers == self.num_hidden_layers + 1:
-            h = h.sum(-1, keepdim=True)
+            ### [..., M] --> [..., M//O, O]
+            h_sh = h.shape
+            h = h.reshape(*h_sh[:-1], self.out_features, -1).sum(-1)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
             h = self.net[i](h)
         if ret_feat:
@@ -319,7 +323,8 @@ class SplitFCBlock(MetaModule):
         if self.learn_code:
             h = h * self.code
         if self.approx_layers == self.num_hidden_layers + 1:
-            h = h.sum(-1, keepdim=True)
+            h_sh = h.shape
+            h = h.reshape(*h_sh[:-1], self.out_features, -1).sum(-1)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
             h = self.net[i](h)
         return h
