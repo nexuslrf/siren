@@ -126,11 +126,10 @@ class SplitFCBlock(MetaModule):
     Can be used just as a normal neural network though, as well.
     '''
 
-    def __init__(self, in_features, out_features, num_hidden_layers, hidden_features,
-                 outermost_linear=False, nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2, 
-                 split_rule=None, fusion_operator='sum', act_scale=1, fusion_before_act=False, use_atten=False):
+    def __init__(self, in_features, out_features, num_hidden_layers, hidden_features, outermost_linear=False, 
+            nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2, split_rule=None, fusion_operator='sum', 
+            act_scale=1, fusion_before_act=False, use_atten=False, learn_code=False, last_layer_features=-1):
         super().__init__()
-
         self.first_layer_init = None
         self.coord_dim = coord_dim
         feat_per_channel = in_features // coord_dim
@@ -146,8 +145,11 @@ class SplitFCBlock(MetaModule):
         self.fusion_before_act = fusion_before_act
         self.out_features = out_features
         self.use_atten = use_atten
-        last_layer_features = hidden_features \
-            if approx_layers == num_hidden_layers + 1 else out_features
+        self.learn_code = learn_code
+        if approx_layers != num_hidden_layers + 1:
+            last_layer_features = out_features
+        elif last_layer_features < 0:
+            last_layer_features = hidden_features
 
         # Dictionary that maps nonlinearity name to the respective function, initialization, and, if applicable,
         # special first-layer initialization scheme
@@ -208,9 +210,11 @@ class SplitFCBlock(MetaModule):
             self.approx_layers-1 != self.num_hidden_layers + 1:
             
             self.net[self.approx_layers-1][1].inplace = False
+        if learn_code:
+            self.code = nn.parameter.Parameter(torch.ones(hidden_features))
             
 
-    def forward(self, coords, params=None, pos_codes=None, split_coord=False, **kwargs):
+    def forward(self, coords, params=None, pos_codes=None, split_coord=False, ret_feat=False, **kwargs):
         """
         When split_coord=True, the input coords should be a list a tensor for each coord.
         the length of each coord tensor do not need to be the same. But the dimension of each coord tensor
@@ -223,18 +227,21 @@ class SplitFCBlock(MetaModule):
             hs = [self.forward_channel(coord, i, pos_codes) for i, coord in enumerate(coords)]
             h = self.forward_fusion(hs)
             sh = h.shape
-            return h.reshape(sh[0], -1, sh[-1])
+            if ret_feat:
+                return (h.reshape(sh[0], -1, sh[-1]), hs)
+            else:
+                return h.reshape(sh[0], -1, sh[-1])
 
         hs = torch.split(coords, self.feat_per_channel, dim=-1)
         coord_h = []
         for i, hi in enumerate(hs):
             h = self.coord_linears[i](hi)
             coord_h.append(h)
-        h = torch.stack(coord_h, -2)
-        h = self.coord_nl(h)
+        hs = torch.stack(coord_h, -2)
+        hs = self.coord_nl(hs)
 
         for i in range(self.approx_layers-1):
-            h = self.net[i](h)
+            hs = self.net[i](hs)
         
         # layer before fusion
         if not self.fusion_before_act:
@@ -264,12 +271,16 @@ class SplitFCBlock(MetaModule):
             if self.use_atten:
                 h = h * self.atten(coords)
             h = self.net[self.approx_layers-1][1](h)
-
+        if self.learn_code:
+            h = h * self.code
         if self.approx_layers == self.num_hidden_layers + 1:
             h = h.sum(-1, keepdim=True)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
             h = self.net[i](h)
-        return h
+        if ret_feat:
+            return (h, hs)
+        else:
+            return h
     
     def forward_channel(self, coord, channel_id, pos_codes=None):
         h = self.coord_linears[channel_id](coord)
@@ -305,6 +316,8 @@ class SplitFCBlock(MetaModule):
         #     h = hs
         if self.fusion_before_act:
             h = self.net[self.approx_layers-1][1](h)
+        if self.learn_code:
+            h = h * self.code
         if self.approx_layers == self.num_hidden_layers + 1:
             h = h.sum(-1, keepdim=True)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
@@ -364,11 +377,13 @@ class SingleBVPNet(MetaModule):
                                act_scale=kwargs.get("act_scale", 1),
                                fusion_operator=kwargs.get("fusion_operator", 'prod'),
                                fusion_before_act=kwargs.get("fusion_before_act", False),
-                               use_atten=kwargs.get("use_atten", False)
+                               use_atten=kwargs.get("use_atten", False),
+                               learn_code=kwargs.get("learn_code", False),
+                               last_layer_features=kwargs.get("last_layer_features", -1)
                                )
         print(self)
 
-    def forward(self, model_input, params=None):
+    def forward(self, model_input, params=None, ret_feat=False):
         '''
         if coords_split in model_input, then model_input['coords_split'] should be a list of tensors for each coord
         '''
@@ -401,7 +416,7 @@ class SingleBVPNet(MetaModule):
             coords = coords_org
             if self.mode == 'nerf':
                 coords = [self.positional_encoding(coord, single_channel=True) for coord in coords]
-            output = self.net(coords, split_coord=True)
+            output = self.net(coords, split_coord=True, ret_feat=ret_feat)
             
         return {'model_in': coords_org, 'model_out': output}
 

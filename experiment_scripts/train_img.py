@@ -45,6 +45,9 @@ p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='
 p.add_argument('--fusion_before_act', action='store_true')
 p.add_argument('--image_path', type=str, default='')
 p.add_argument('--use_atten', action='store_true')
+p.add_argument('--learn_code', action='store_true')
+p.add_argument('--orth_reg', action='store_true')
+p.add_argument('--last_layer_features', type=int, default=-1)
 opt = p.parse_args()
 
 if opt.split_train:
@@ -69,11 +72,13 @@ dataloader = DataLoader(coord_dataset, shuffle=True, batch_size=opt.batch_size, 
 # Define the model.
 if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'tanh' or opt.model_type == 'selu' or opt.model_type == 'elu'\
         or opt.model_type == 'softplus':
-    model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', out_features=img_dataset.img_channels, sidelength=image_resolution, split_mlp=opt.split_mlp, 
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
+    model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', out_features=img_dataset.img_channels, sidelength=image_resolution, 
+        split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
-    model = modules.SingleBVPNet(type='relu', mode=opt.model_type, out_features=img_dataset.img_channels, sidelength=image_resolution, split_mlp=opt.split_mlp,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
+    model = modules.SingleBVPNet(type='relu', mode=opt.model_type, out_features=img_dataset.img_channels, sidelength=image_resolution, 
+        split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features)
 else:
     raise NotImplementedError
 model.cuda()
@@ -81,13 +86,13 @@ model.cuda()
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 
 # Define the loss
-loss_fn = partial(loss_functions.image_mse, None)
+loss_fn = partial(loss_functions.image_mse, None) if not opt.orth_reg else loss_functions.image_svd
 summary_fn = partial(utils.write_image_summary, image_resolution)
 
 if not opt.speed_test:
     training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
-                steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
-                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, split_train=opt.split_train)
+                steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt, model_dir=root_path, 
+                loss_fn=loss_fn, summary_fn=summary_fn, split_train=opt.split_train, orth_reg=opt.orth_reg)
 # # test image
 else:
     test_len = 50

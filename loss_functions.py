@@ -11,6 +11,14 @@ def image_mse(mask, model_output, gt):
     else:
         return {'img_loss': (mask * (model_output['model_out'] - gt['img']) ** 2).mean()}
 
+def image_svd(model_output, gt):
+    img_pred, feats = model_output['model_out']
+    feats = [feat.squeeze() for feat in feats]
+    return {
+        'img_loss': ((img_pred - gt['img']) ** 2).mean(),
+        'orth_reg_x': torch.square((feats[0] @ feats[0].T) - torch.eye(feats[0].shape[0]).cuda()).mean() * 0.1,
+        'orth_reg_y': torch.square((feats[1] @ feats[1].T) - torch.eye(feats[1].shape[0]).cuda()).mean() * 0.1,
+        }
 
 def image_l1(mask, model_output, gt):
     if mask is None:
