@@ -12,7 +12,7 @@ import shutil
 from collections import OrderedDict
 
 def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_checkpoint, model_dir, loss_fn, summary_fn, lr_sched=None,
-    val_dataloader=None, double_precision=False, clip_grad=False, use_lbfgs=False, loss_schedules=None, split_train=False):
+    val_dataloader=None, double_precision=False, clip_grad=False, use_lbfgs=False, loss_schedules=None, split_train=False, orth_reg=False):
 
     optim = torch.optim.Adam(lr=lr, params=model.parameters())
 
@@ -56,7 +56,7 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
 
                 train_loss = train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writer, train_losses,
                             total_steps, double_precision, use_lbfgs, steps_til_summary, 
-                            checkpoints_dir, summary_fn, clip_grad, split_train)
+                            checkpoints_dir, summary_fn, clip_grad, split_train, orth_reg)
 
                 pbar.update(1)
                 if scheduler is not None: scheduler.step()
@@ -85,8 +85,8 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
         np.savetxt(os.path.join(checkpoints_dir, 'train_losses_final.txt'),
                    np.array(train_losses))
 
-def train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writer, train_losses,
-    total_steps, double_precision, use_lbfgs, steps_til_summary, checkpoints_dir, summary_fn, clip_grad, split_train):
+def train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writer, train_losses, total_steps, 
+    double_precision, use_lbfgs, steps_til_summary, checkpoints_dir, summary_fn, clip_grad, split_train, orth_reg):
 
     model_input = {key: apply_cuda(value) for key, value in model_input.items()}
     gt = {key: apply_cuda(value) for key, value in gt.items()}
@@ -103,13 +103,13 @@ def train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writ
             losses = loss_fn(model_output, gt)
             train_loss = 0.
             for loss_name, loss in losses.items():
-                train_loss += loss.mean() 
+                train_loss += loss.mean()
             train_loss.backward()
             return train_loss
         optim.step(closure)
 
     # print(model_input['coords'].shape)
-    model_output = model(model_input) #, split_coord=split_train) #, params=OrderedDict(model.named_parameters()))
+    model_output = model(model_input, ret_feat=orth_reg) #, split_coord=split_train) #, params=OrderedDict(model.named_parameters()))
     # print(model_output['model_out'].shape)
     losses = loss_fn(model_output, gt)
 
@@ -133,6 +133,8 @@ def train_one_epoch(model_input, gt, model, optim, loss_fn, loss_schedules, writ
         # with torch.no_grad():
         #     model_output = model({'coords': model_input['coords'] * 0.6 + 0.2})
         #####
+        if orth_reg:
+            model_output['model_out']= model_output['model_out'][0]
         summary_fn(model, model_input, gt, model_output, writer, total_steps)
 
     if not use_lbfgs:

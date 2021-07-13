@@ -46,6 +46,10 @@ p.add_argument('--test_dim', type=int, default=512)
 p.add_argument('--speed_test', action='store_true')
 p.add_argument('--split_train', action='store_true')
 p.add_argument('-j', '--workers', default=4, type=int, help='number of data loading workers (default: 4)')
+p.add_argument('--approx_layers', type=int, default=2)
+p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
+p.add_argument('--last_layer_features', type=int, default=-1)
+
 opt = p.parse_args()
 
 if opt.dataset == 'cat':
@@ -64,11 +68,13 @@ else:
 
 # Define the model.
 if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'tanh':
-    model = modules.SingleBVPNet(type=opt.model_type, in_features=3, out_features=vid_dataset.channels,
-                                 mode='mlp', hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp, split_rule=split_rule)
+    model = modules.SingleBVPNet(type=opt.model_type, in_features=3, out_features=vid_dataset.channels, mode='mlp', 
+        hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp, split_rule=split_rule, approx_layers=opt.approx_layers,
+        fusion_operator=opt.fusion_operator, last_layer_features=opt.last_layer_features)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
     model = modules.SingleBVPNet(type='relu', in_features=3, out_features=vid_dataset.channels, mode=opt.model_type, 
-                                 hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp, split_rule=split_rule)
+        hidden_features=1024, num_hidden_layers=3, split_mlp=opt.split_mlp, split_rule=split_rule, approx_layers=opt.approx_layers,
+        fusion_operator=opt.fusion_operator, last_layer_features=opt.last_layer_features)
 else:
     raise NotImplementedError
 
