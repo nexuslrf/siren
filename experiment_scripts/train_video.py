@@ -49,6 +49,7 @@ p.add_argument('-j', '--workers', default=4, type=int, help='number of data load
 p.add_argument('--approx_layers', type=int, default=2)
 p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
 p.add_argument('--last_layer_features', type=int, default=-1)
+p.add_argument('--lr_decay', type=float, default=0.9995395890030878)
 
 opt = p.parse_args()
 
@@ -89,11 +90,12 @@ root_path = os.path.join(opt.logging_root, opt.experiment_name)
 # Define the loss
 loss_fn = partial(loss_functions.image_mse, None)
 summary_fn = partial(utils.write_video_summary, vid_dataset)
+lr_sched = lambda optim: torch.optim.lr_scheduler.ExponentialLR(optim, opt.lr_decay)
 
 if not opt.speed_test:
     training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
                 steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
-                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn)
+                model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, lr_sched=lr_sched)
 
 else:
     vid_len = 100

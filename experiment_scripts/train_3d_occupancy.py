@@ -50,6 +50,8 @@ p.add_argument('-j', '--workers', default=4, type=int, help='number of data load
 p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fourier')
 p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
 p.add_argument('--use_atten', action='store_true')
+p.add_argument('--last_layer_features', type=int, default=-1)
+
 p.add_argument('--rbatches', type=int, default=1)
 opt = p.parse_args()
 
@@ -62,10 +64,12 @@ if opt.model_type == 'fourier':
         approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
 elif opt.model_type == 'nerf':
     model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 else:
     model = modules.SingleBVPNet(type=opt.model_type, in_features=3, split_mlp=opt.split_mlp,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 model.cuda()
 
 # Define the loss
