@@ -48,6 +48,7 @@ p.add_argument('--use_atten', action='store_true')
 p.add_argument('--learn_code', action='store_true')
 p.add_argument('--orth_reg', action='store_true')
 p.add_argument('--last_layer_features', type=int, default=-1)
+p.add_argument('--fusion_size', type=int, default=1)
 opt = p.parse_args()
 
 if opt.split_train:
@@ -74,11 +75,13 @@ if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'ta
         or opt.model_type == 'softplus':
     model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', out_features=img_dataset.img_channels, sidelength=image_resolution, 
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
-        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features)
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
+        fusion_size=opt.fusion_size)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
     model = modules.SingleBVPNet(type='relu', mode=opt.model_type, out_features=img_dataset.img_channels, sidelength=image_resolution, 
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
-        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features)
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
+        fusion_size=opt.fusion_size)
 else:
     raise NotImplementedError
 model.cuda()

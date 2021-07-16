@@ -128,7 +128,7 @@ class SplitFCBlock(MetaModule):
 
     def __init__(self, in_features, out_features, num_hidden_layers, hidden_features, outermost_linear=False, 
             nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2, split_rule=None, fusion_operator='sum', 
-            act_scale=1, fusion_before_act=False, use_atten=False, learn_code=False, last_layer_features=-1):
+            act_scale=1, fusion_before_act=False, use_atten=False, learn_code=False, last_layer_features=-1, fusion_size=1):
         super().__init__()
         self.first_layer_init = None
         self.coord_dim = coord_dim
@@ -146,8 +146,13 @@ class SplitFCBlock(MetaModule):
         self.out_features = out_features
         self.use_atten = use_atten
         self.learn_code = learn_code
+        self.fusion_size = 1
+        self.fusion_feat_size = out_features
+
         if approx_layers != num_hidden_layers + 1:
             last_layer_features = 1
+            self.fusion_size = fusion_size
+            self.fusion_feat_size = hidden_features
         elif last_layer_features < 0:
             last_layer_features = hidden_features # Channels
         
@@ -172,7 +177,7 @@ class SplitFCBlock(MetaModule):
             self.weight_init = nl_weight_init
 
         self.coord_linears = nn.ModuleList(
-            [BatchLinear(feat, hidden_features) for feat in self.feat_per_channel]
+            [BatchLinear(feat, hidden_features*fusion_size) for feat in self.feat_per_channel]
         )
         self.coord_nl = nl
         self.coord_nl.split_scale = split_scale
@@ -181,10 +186,13 @@ class SplitFCBlock(MetaModule):
             self.coord_linears.apply(first_layer_init)
         else:
             self.coord_linears.apply(self.weight_init)
-
+ 
         self.net = []
-
-        for i in range(num_hidden_layers):
+        for i in range(min(approx_layers, num_hidden_layers)):
+            self.net.append(MetaSequential(
+                BatchLinear(hidden_features*fusion_size, hidden_features*fusion_size), nl
+            ))
+        for j in range(i+1, num_hidden_layers):
             self.net.append(MetaSequential(
                 BatchLinear(hidden_features, hidden_features), nl
             ))
@@ -206,14 +214,14 @@ class SplitFCBlock(MetaModule):
             except:
                 pass
         if use_atten:
-            self.atten = BatchLinear(in_features, hidden_features)
+            self.atten = BatchLinear(in_features, hidden_features*fusion_size)
             self.atten.apply(self.weight_init)
         if fusion_before_act and nonlinearity.endswith('elu') and \
             self.approx_layers-1 != self.num_hidden_layers + 1:
             
             self.net[self.approx_layers-1][1].inplace = False
         if learn_code:
-            self.code = nn.parameter.Parameter(torch.ones(hidden_features))
+            self.code = nn.parameter.Parameter(torch.ones(hidden_features*fusion_size))
             
 
     def forward(self, coords, params=None, pos_codes=None, split_coord=False, ret_feat=False, **kwargs):
@@ -275,10 +283,11 @@ class SplitFCBlock(MetaModule):
             h = self.net[self.approx_layers-1][1](h)
         if self.learn_code:
             h = h * self.code
-        if self.approx_layers == self.num_hidden_layers + 1:
-            ### [..., M] --> [..., M//O, O]
-            h_sh = h.shape
-            h = h.reshape(*h_sh[:-1], self.out_features, -1).sum(-1)
+        # if self.approx_layers == self.num_hidden_layers + 1:
+        #     ### [..., M] --> [..., M//O, O]
+        h_sh = h.shape
+        h = h.reshape(*h_sh[:-1], self.fusion_feat_size, -1).sum(-1)
+
         for i in range(self.approx_layers, self.num_hidden_layers+1):
             h = self.net[i](h)
         if ret_feat:
@@ -322,9 +331,9 @@ class SplitFCBlock(MetaModule):
             h = self.net[self.approx_layers-1][1](h)
         if self.learn_code:
             h = h * self.code
-        if self.approx_layers == self.num_hidden_layers + 1:
-            h_sh = h.shape
-            h = h.reshape(*h_sh[:-1], self.out_features, -1).sum(-1)
+        # if self.approx_layers == self.num_hidden_layers + 1:
+        h_sh = h.shape
+        h = h.reshape(*h_sh[:-1], self.fusion_feat_size, -1).sum(-1)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
             h = self.net[i](h)
         return h
@@ -384,7 +393,8 @@ class SingleBVPNet(MetaModule):
                                fusion_before_act=kwargs.get("fusion_before_act", False),
                                use_atten=kwargs.get("use_atten", False),
                                learn_code=kwargs.get("learn_code", False),
-                               last_layer_features=kwargs.get("last_layer_features", -1)
+                               last_layer_features=kwargs.get("last_layer_features", -1),
+                               fusion_size=kwargs.get("fusion_size", 1)
                                )
         print(self)
 
