@@ -123,7 +123,7 @@ else:
             f_feat = x_feat.unsqueeze(1) + y_feat.unsqueeze(0)
             print(t_feat.shape, f_feat.shape)
             for i in range(vid_len):
-                model_output = model.forward_split_fusion(f_feat + t_feat[i])
+                model_output = model.forward_split_fusion([f_feat,t_feat[i]])
                 f"{model_output[...,0]}"
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/vid_len}")
@@ -136,7 +136,7 @@ else:
             t_feat = model.forward_split_channel(t, 0)
             print(t_feat.shape, xy_feat.shape)
             for i in range(vid_len):
-                model_output = model.forward_split_fusion(xy_feat + t_feat[i])
-                f"{model_output[...,0]}"
+                model_output = model.forward_split_fusion([xy_feat,t_feat[i]])
+                # f"{model_output[...,0]}"
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/vid_len}")

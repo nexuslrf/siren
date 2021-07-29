@@ -50,6 +50,7 @@ p.add_argument('--rbatches', type=int, default=32)
 p.add_argument('--test_mode', type=str, choices=['volrend', 'mcube'], default='volrend')
 p.add_argument('--fine_pass', action='store_true')
 p.add_argument('--split_accel', action='store_true')
+p.add_argument('--last_layer_features', type=int, default=-1)
 opt = p.parse_args()
 
 mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter, split_coord=opt.split_train)
@@ -57,13 +58,16 @@ mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, nu
 # Define the model.
 if opt.model_type == 'fourier':
     model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp, freq_params=[6., 256//3], include_coord=False,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 elif opt.model_type == 'nerf':
     model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 else:
     model = modules.SingleBVPNet(type=opt.model_type, in_features=3, split_mlp=opt.split_mlp,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 
 model.load_state_dict(torch.load(opt.checkpoint_path))
 model.cuda()
@@ -87,9 +91,12 @@ if opt.test_mode == 'volrend':
     rbatch = H // opt.rbatches if opt.rbatch == 0 else opt.rbatch
     render_args_hr = [mesh_dataset.corners, R-1, R+1, N_samples, N_samples_2,
                         True, mesh_dataset.pts_trans_fn, opt.fine_pass]
+    t0 = time.time()
     depth_map, acc_map = render_fn(model, mesh_dataset, rbatch, rays, render_args_hr)
     norm_map = ((make_normals(rays, depth_map) * .5 + .5) * 255).cpu().numpy().astype(np.uint8)
     img_path = os.path.join(root_path, f"norm_map_{H}.png")
+    t1 = time.time()
+    print(f"Time consumed: {t1-t0}")
     imageio.imsave(img_path, norm_map)
     print(f"save {img_path}")
 

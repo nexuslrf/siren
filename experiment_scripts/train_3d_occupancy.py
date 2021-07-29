@@ -61,7 +61,8 @@ dataloader = DataLoader(mesh_dataset, shuffle=False, batch_size=1, pin_memory=Tr
 # Define the model.
 if opt.model_type == 'fourier':
     model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp, freq_params=[6., 256//3], include_coord=False,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten)
+        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 elif opt.model_type == 'nerf':
     model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp,
         approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
@@ -112,7 +113,7 @@ else:
                 z_feat = model.forward_split_channel(z, 2)
                 sh = list(x_feat.shape)[1:]
                 fusion_feat = x_feat.reshape([1,1, N] + sh) + y_feat.reshape([1,N,1] + sh) + z_feat.reshape([N,1,1]+sh)
-                model_output = model.forward_split_fusion(x_feat.unsqueeze(1) + y_feat.unsqueeze(0) + z_feat.unsqueeze(0))
+                model_output = model.forward_split_fusion([x_feat.unsqueeze(1), y_feat.unsqueeze(0), z_feat.unsqueeze(0)])
                 f"{model_output[...,0]}"
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/test_len}")

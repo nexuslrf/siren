@@ -114,9 +114,9 @@ else:
             y = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
             t0 = time.time()
             for i in range(test_len):
-                x_feat = model.forward_split_channel(x, 0)
-                y_feat = model.forward_split_channel(y, 1)
-                model_output = model.forward_split_fusion(x_feat.unsqueeze(1) + y_feat.unsqueeze(0))
+                x_feat = model.forward_split_channel(x, 0).unsqueeze(1)
+                y_feat = model.forward_split_channel(y, 1).unsqueeze(0)
+                model_output = model.forward_split_fusion([x_feat, y_feat])
                 f"{model_output[...,0]}"
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/test_len}")
