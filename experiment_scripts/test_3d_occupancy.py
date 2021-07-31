@@ -51,6 +51,8 @@ p.add_argument('--test_mode', type=str, choices=['volrend', 'mcube'], default='v
 p.add_argument('--fine_pass', action='store_true')
 p.add_argument('--split_accel', action='store_true')
 p.add_argument('--last_layer_features', type=int, default=-1)
+p.add_argument('--no_cache', action='store_true')
+# p.add_argument('--precompute', action='store_true')
 opt = p.parse_args()
 
 mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter, split_coord=opt.split_train)
@@ -74,29 +76,59 @@ model.cuda()
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 print("load model!")
 if opt.test_mode == 'volrend':
-    if opt.split_accel:
-        assert opt.split_mlp
-        render_fn = lambda m,d,b,r,a: vol_render_split(m,d,b,r,a,resolution=opt.resolution)
+    c0, c1 = (torch.as_tensor(c).float().cuda() for c in mesh_dataset.corners)
+    if opt.no_cache:
+        render_fn = lambda m,d,b,r,a: vol_render(m,d,b,r,a)
+    # TODO pre-compute here!
     else:
-        render_fn = lambda m,d,b,r,a: vol_render_nosplit(m,d,b,r,a, resolution=opt.resolution, grid_batch=opt.grid_batch)
+        eps = 1e-5
+        t0 = time.time()
+        bins = [torch.linspace(c0[i], c1[i]+eps, opt.resolution+1) for i in range(3)]
+        dsteps = torch.stack([(c1[i] + eps - c0[i]) / opt.resolution for i in range(3)])#.cuda()
+        if opt.split_accel:
+            assert opt.split_mlp  
+            with torch.no_grad():
+                feats = [model.forward_split_channel(b[...,None].cuda(), i) for i,b in enumerate(bins)]
+            precompute = {
+                'vmins': c0, 'vmaxs': c1, 'dsteps': dsteps, 'feats': feats
+            }
+            # precompute = None
+            render_fn = lambda m,d,b,r,a: vol_render_split(m,d,b,r,a,resolution=opt.resolution, precompute=precompute)
+        else:
+            bins = torch.stack(torch.meshgrid(bins[0], bins[1], bins[2]), axis=-1).view(-1, 3)
+            feats = []
+            g_batch = bins.shape[0] // opt.grid_batch + 1
+            for i in range(opt.grid_batch):
+                with torch.no_grad():
+                    input_bin = bins[i*g_batch:(i+1)*g_batch, :].cuda()
+                    feats.append(model.forward({"coords":input_bin})['model_out'])
+            feats = torch.cat(feats, dim=0).cuda()
+            precompute = {
+                'vmins': c0, 'vmaxs': c1, 'dsteps': dsteps, 'feats': feats
+            }
+            # precompute = None
+            render_fn = lambda m,d,b,r,a: vol_render_nosplit(m,d,b,r,a, 
+                            resolution=opt.resolution, grid_batch=opt.grid_batch, precompute=precompute)
 
     R = 2.
-    c2w = pose_spherical(90. + 10 + 45, -30., R)
     N_samples = 256
     N_samples_2 = 256 # We will consider second level sampling later
     H = 512
     W = H
     focal = H * .9
-    rays = get_rays(H, W, focal, c2w[:3,:4])
-    rbatch = H // opt.rbatches if opt.rbatch == 0 else opt.rbatch
-    render_args_hr = [mesh_dataset.corners, R-1, R+1, N_samples, N_samples_2,
-                        True, mesh_dataset.pts_trans_fn, opt.fine_pass]
-    t0 = time.time()
-    depth_map, acc_map = render_fn(model, mesh_dataset, rbatch, rays, render_args_hr)
-    norm_map = ((make_normals(rays, depth_map) * .5 + .5) * 255).cpu().numpy().astype(np.uint8)
-    img_path = os.path.join(root_path, f"norm_map_{H}.png")
+    cnt = 0
+    for deg in range(0, 91, 5):
+        c2w = pose_spherical(90. + 10 + deg, -30, R) # default: + 45
+        rays = get_rays(H, W, focal, c2w[:3,:4])
+        rbatch = H // opt.rbatches if opt.rbatch == 0 else opt.rbatch
+        render_args_hr = [(c0,c1), R-1, R+1, N_samples, N_samples_2,
+                            True, mesh_dataset.pts_trans_fn, opt.fine_pass]
+        depth_map, acc_map = render_fn(model, mesh_dataset, rbatch, rays, render_args_hr)
+        norm_map = ((make_normals(rays, depth_map) * .5 + .5) * 255).cpu().numpy().astype(np.uint8)
+        cnt += 1
     t1 = time.time()
-    print(f"Time consumed: {t1-t0}")
+    print(f"Time consumed: {(t1-t0)/cnt}")
+    img_path = os.path.join(root_path, f"norm_map_{H}_{deg}.png")
     imageio.imsave(img_path, norm_map)
     print(f"save {img_path}")
 
