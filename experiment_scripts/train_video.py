@@ -27,7 +27,7 @@ p.add_argument('--lr', type=float, default=1e-4, help='learning rate. default=1e
 p.add_argument('--num_epochs', type=int, default=100000,
                help='Number of epochs to train for.')
 
-p.add_argument('--epochs_til_ckpt', type=int, default=1000,
+p.add_argument('--epochs_til_ckpt', type=int, default=2000,
                help='Time interval in seconds until checkpoint is saved.')
 p.add_argument('--steps_til_summary', type=int, default=200,
                help='Time interval in seconds until tensorboard summary is saved.')
@@ -36,7 +36,7 @@ p.add_argument('--dataset', type=str, default='bikes',
 p.add_argument('--model_type', type=str, default='sine',
                help='Options currently are "sine" (all sine activations), "relu" (all relu activations,'
                     '"nerf" (relu activations and positional encoding as in NeRF), "rbf" (input rbf layer, rest relu)')
-p.add_argument('--sample_frac', type=float, default=18e-4, # 38e-4 is the default value if split_train is not set.
+p.add_argument('--sample_frac', type=float, default=38e-4, # 38e-4 is the default value if split_train is not set.
                help='What fraction of video pixels to sample in each batch (default is all)')
 
 p.add_argument('--checkpoint_path', default=None, help='Checkpoint to trained model.')
@@ -49,17 +49,17 @@ p.add_argument('-j', '--workers', default=4, type=int, help='number of data load
 p.add_argument('--approx_layers', type=int, default=2)
 p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
 p.add_argument('--last_layer_features', type=int, default=-1)
-p.add_argument('--lr_decay', type=float, default=0.9995395890030878)
+p.add_argument('--lr_decay', type=float, default=1) #0.9995395890030878)
 
 opt = p.parse_args()
 
 if opt.dataset == 'cat':
-    video_path = './data/video_512.npy'
+    video_path = './data/cat_video.mp4'
 elif opt.dataset == 'bikes':
     video_path = skvideo.datasets.bikes()
 
 vid_dataset = dataio.Video(video_path)
-coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, split_coord=opt.split_train, sample_fraction=opt.sample_frac, frame_sample_fraction=0.608, pixel_sample_fraction=0.00625, batch_size=opt.batch_size)
+coord_dataset = dataio.Implicit3DWrapper(vid_dataset, sidelength=vid_dataset.shape, split_coord=opt.split_train, sample_fraction=opt.sample_frac, batch_size=opt.batch_size) #  frame_sample_fraction=0.608, pixel_sample_fraction=0.00625, 
 dataloader = DataLoader(coord_dataset, shuffle=False, batch_size=1, pin_memory=True, num_workers=opt.workers, worker_init_fn=dataio.worker_init_fn)
 
 if opt.st_split:

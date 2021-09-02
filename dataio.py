@@ -912,10 +912,10 @@ class Implicit3DWrapper(torch.utils.data.Dataset):
             self.mgrid_z = get_mgrid(sidelength[0], dim=1).unsqueeze(1)
             self.n_z = sidelength[0]
             self.n_xy = sidelength[1] * sidelength[2]
-            self.frame_sample_fraction = frame_sample_fraction
-            self.pixel_sample_fraction = pixel_sample_fraction
-            self.frame_samples = int(self.frame_sample_fraction * self.n_z)
-            self.img_samples = int(self.pixel_sample_fraction * self.n_xy)
+            # self.frame_sample_fraction = frame_sample_fraction
+            # self.pixel_sample_fraction = pixel_sample_fraction
+            # self.frame_samples = int(self.frame_sample_fraction * self.n_z)
+            # self.img_samples = int(self.pixel_sample_fraction * self.n_xy)
             self.N_samples = self.n_z * self.n_xy * self.sample_fraction
         else:
             self.mgrid = get_mgrid(sidelength, dim=3)
@@ -926,9 +926,9 @@ class Implicit3DWrapper(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         if self.split_coord:
-            z_num = np.random.randint(int(self.n_z*0.1), int(self.n_z*0.9))
+            z_num = np.random.randint(round(self.n_z*0.1), round(self.n_z*0.9))
             coord_idx = torch.randperm(self.n_z)[:z_num]
-            coord_idy = torch.randint(0, self.n_xy, (int(self.N_samples/z_num),))
+            coord_idy = torch.randint(0, self.n_xy, (round(self.N_samples/z_num),))
             # coord_idx = torch.randint(0, self.n_z, (self.frame_samples,))
             # coord_idy = torch.randint(0, self.n_xy, (self.img_samples,))
             coord_id = (coord_idx[:,None] * self.n_xy + coord_idy[None, :]).reshape(-1)
