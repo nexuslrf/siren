@@ -6,7 +6,7 @@ The migration of 3d occupancy learning tasks from fourier-feat paper to SIREN
 import sys
 import os
 sys.path.append( os.path.dirname( os.path.dirname( os.path.abspath(__file__) ) ) )
-import time
+import time, tqdm
 import dataio, meta_modules, utils, training, loss_functions, modules
 import torch
 from torch.utils.data import DataLoader
@@ -27,7 +27,7 @@ p.add_argument('--lr', type=float, default=5e-4, help='learning rate. default=5e
 p.add_argument('--num_epochs', type=int, default=10000,
                help='Number of epochs to train for.')
 
-p.add_argument('--epochs_til_ckpt', type=int, default=1000,
+p.add_argument('--epochs_til_ckpt', type=int, default=2000,
                help='Time interval in seconds until checkpoint is saved.')
 p.add_argument('--steps_til_summary', type=int, default=100,
                help='Time interval in seconds until tensorboard summary is saved.')
@@ -46,17 +46,34 @@ p.add_argument('--fusion_before_act', action='store_true')
 p.add_argument('--speed_test', action='store_true')
 p.add_argument('--split_train', action='store_true')
 p.add_argument('--test_dim', type=int, default=512)
-p.add_argument('-j', '--workers', default=4, type=int, help='number of data loading workers (default: 4)')
+p.add_argument('-j', '--workers', default=2, type=int, help='number of data loading workers (default: 4)')
 p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fourier')
 p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
 p.add_argument('--use_atten', action='store_true')
 p.add_argument('--last_layer_features', type=int, default=-1)
+p.add_argument('--prep_cache', action='store_true')
+p.add_argument('--pts_cache', type=str, default="")
 
 p.add_argument('--rbatches', type=int, default=1)
 opt = p.parse_args()
 
-mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, recenter=opt.recenter, split_coord=opt.split_train)
+mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, 
+        recenter=opt.recenter, split_coord=opt.split_train, pts_cache=opt.pts_cache if not opt.prep_cache else '')
 dataloader = DataLoader(mesh_dataset, shuffle=False, batch_size=1, pin_memory=True, num_workers=opt.workers, worker_init_fn=dataio.worker_init_fn)
+
+if opt.prep_cache:
+    total_step = 0
+    data = []
+    in_label = 'coords_split' if opt.split_train else 'coords'
+    with tqdm.tqdm(total=opt.num_epochs) as pbar:
+        while total_step < opt.num_epochs:
+            for model_input, gt in dataloader:
+                data.append({'in': model_input[in_label], 'gt': gt['occupancy']})
+                pbar.update(1)
+                total_step += 1
+    torch.save(data, opt.pts_cache)
+    exit()
+
 
 # Define the model.
 if opt.model_type == 'fourier':

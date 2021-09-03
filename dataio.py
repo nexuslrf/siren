@@ -473,7 +473,7 @@ class PointCloud(Dataset):
 
 class Mesh(Dataset):
     def __init__(self, mesh_path, pts_per_batch, keep_aspect_ratio=True, num_batches=1, \
-        recenter='fourier', split_coord=False):
+        recenter='fourier', split_coord=False, pts_cache=""):
         super().__init__()
         self.num_batches = num_batches
         self.pts_per_batch = pts_per_batch
@@ -555,6 +555,12 @@ class Mesh(Dataset):
             ray_rendering.get_rays(H, W, focal, c2w[:3,:4]), self.corners, 
                 R-1, R+1, N_samples, N_samples_2, True, self.pts_trans_fn]
 
+        if self.split_coord:
+            vol = (self.corners[1] - self.corners[0]).prod()
+            gamma = ((self.pts_per_batch / vol) ** (1/3)).item()
+            self.pts_per_axis = (self.corners[1] - self.corners[0]) * gamma
+            self.mu = 0.4 # (1+x)^2(1-x)=1
+
         self.pts_eval = {
             'pts_metrics': test_pts,
             'gt_metrics': test_gt,
@@ -563,6 +569,11 @@ class Mesh(Dataset):
             'render_args_lr': render_args_lr
         }
 
+        self.pts_cache = None
+        if pts_cache:
+            self.pts_cache = torch.load(pts_cache)
+            self.num_batches = len(self.pts_cache)
+            
     def make_test_pts(self, test_size=2**18):
         c0, c1 = self.corners
         test_easy = np.random.uniform(size=[test_size, 3]) * (c1-c0) + c0
@@ -596,8 +607,17 @@ class Mesh(Dataset):
         return self.num_batches
 
     def __getitem__(self, idx):
-        if self.split_coord:
-            pts = [(torch.rand(self.pts_per_batch, 1) * (self.corners[1][i]-self.corners[0][i]) + self.corners[0][i]) for i in range(3)]
+        if self.pts_cache is not None:
+            in_label = 'coords_split' if self.split_coord else 'coords'
+            return {in_label: self.pts_cache[idx]['in']}, {'occupancy': self.pts_cache[idx]['occupancy']}
+        elif self.split_coord:
+            rand_scale = (torch.rand(3) * 2 - 1) * self.mu + 1
+            r = 1/rand_scale[0]
+            rb = ((r/(1+self.mu)).clamp_min(1-self.mu), (r/(1-self.mu)).clamp_max(1+self.mu))
+            rand_scale[1] = torch.rand(1) * (rb[1]-rb[0]) + rb[0]
+            rand_scale[2] = 1 / rand_scale[:2].prod()
+            pts = [(torch.rand(round((self.pts_per_axis[i]*rand_scale[i]).item()), 1) \
+                    * (self.corners[1][i]-self.corners[0][i]) + self.corners[0][i]) for i in range(3)]
             gt = self.gt_fn(pts, split_coord=True)[...,None]
             return {'coords_split': [pts[0].view(-1, 1, 1, 1), pts[1].view(1, -1, 1, 1), pts[2].view(1, 1, -1, 1)]},\
                 {'occupancy': torch.from_numpy(gt).float()}
