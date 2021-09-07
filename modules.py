@@ -188,6 +188,7 @@ class SplitFCBlock(MetaModule):
             self.coord_linears.apply(self.weight_init)
  
         self.net = []
+        i = -1
         for i in range(min(approx_layers, num_hidden_layers)):
             self.net.append(MetaSequential(
                 BatchLinear(hidden_features*fusion_size, hidden_features*fusion_size), nl
@@ -256,7 +257,8 @@ class SplitFCBlock(MetaModule):
         # layer before fusion
         if not self.fusion_before_act:
             # for simple fusion strategies
-            hs = self.net[self.approx_layers-1](hs)
+            if self.approx_layers > 0:
+                hs = self.net[self.approx_layers-1](hs)
             if pos_codes is not None:
                 # hs = (hs * pos_codes)
                 hs = (hs + pos_codes)
@@ -298,18 +300,19 @@ class SplitFCBlock(MetaModule):
     def forward_channel(self, coord, channel_id, pos_codes=None):
         h = self.coord_linears[channel_id](coord)
         h = self.coord_nl(h)
-        for i in range(self.approx_layers-1):
-            h = self.net[i](h)
-        # layer before fusion
-        if not self.fusion_before_act:
-            # for simple fusion strategies
-            h = self.net[self.approx_layers-1](h)
-        else:
-            # fusion before activation
-            h = self.net[self.approx_layers-1][0](h)
-        if pos_codes is not None:
-            # h = (h * pos_codes)
-            h = (h + pos_codes)
+        if self.approx_layers > 0:
+            for i in range(self.approx_layers-1):
+                h = self.net[i](h)
+            # layer before fusion
+            if not self.fusion_before_act:
+                # for simple fusion strategies
+                h = self.net[self.approx_layers-1](h)
+            else:
+                # fusion before activation
+                h = self.net[self.approx_layers-1][0](h)
+            if pos_codes is not None:
+                # h = (h * pos_codes)
+                h = (h + pos_codes)
         return h
     
     def forward_fusion(self, hs):
@@ -333,7 +336,8 @@ class SplitFCBlock(MetaModule):
             h = h * self.code
         # if self.approx_layers == self.num_hidden_layers + 1:
         h_sh = h.shape
-        h = h.reshape(*h_sh[:-1], self.fusion_feat_size, -1).sum(-1)
+        if h_sh[-1] > self.fusion_feat_size:
+            h = h.reshape(*h_sh[:-1], self.fusion_feat_size, -1).sum(-1)
         for i in range(self.approx_layers, self.num_hidden_layers+1):
             h = self.net[i](h)
         return h
