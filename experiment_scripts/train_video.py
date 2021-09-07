@@ -137,6 +137,6 @@ else:
             print(t_feat.shape, xy_feat.shape)
             for i in range(vid_len):
                 model_output = model.forward_split_fusion([xy_feat,t_feat[i]])
-                # f"{model_output[...,0]}"
+                f"{model_output[...,0]}"
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/vid_len}")

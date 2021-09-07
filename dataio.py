@@ -609,7 +609,7 @@ class Mesh(Dataset):
     def __getitem__(self, idx):
         if self.pts_cache is not None:
             in_label = 'coords_split' if self.split_coord else 'coords'
-            return {in_label: self.pts_cache[idx]['in']}, {'occupancy': self.pts_cache[idx]['occupancy']}
+            return {in_label: self.pts_cache[idx]['in']}, {'occupancy': self.pts_cache[idx]['gt']}
         elif self.split_coord:
             rand_scale = (torch.rand(3) * 2 - 1) * self.mu + 1
             r = 1/rand_scale[0]

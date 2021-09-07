@@ -51,6 +51,7 @@ p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fo
 p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
 p.add_argument('--use_atten', action='store_true')
 p.add_argument('--last_layer_features', type=int, default=-1)
+p.add_argument('--n_hidden_layers', type=int, default=3)
 p.add_argument('--prep_cache', action='store_true')
 p.add_argument('--pts_cache', type=str, default="")
 
@@ -77,15 +78,15 @@ if opt.prep_cache:
 
 # Define the model.
 if opt.model_type == 'fourier':
-    model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp, freq_params=[6., 256//3], include_coord=False,
-        approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
+    model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp, num_hidden_layers=opt.n_hidden_layers, 
+        freq_params=[6., 256//3], include_coord=False, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 elif opt.model_type == 'nerf':
-    model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp,
+    model = modules.SingleBVPNet(type='relu', mode='nerf', in_features=3, split_mlp=opt.split_mlp, num_hidden_layers=opt.n_hidden_layers,
         approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 else:
-    model = modules.SingleBVPNet(type=opt.model_type, in_features=3, split_mlp=opt.split_mlp,
+    model = modules.SingleBVPNet(type=opt.model_type, in_features=3, split_mlp=opt.split_mlp, num_hidden_layers=opt.n_hidden_layers,
         approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator, 
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, last_layer_features=opt.last_layer_features)
 model.cuda()
@@ -98,11 +99,12 @@ lr_sched = lambda optim: torch.optim.lr_scheduler.ExponentialLR(optim, opt.lr_de
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 
 if not opt.speed_test:
+    t0 = time.time()
     training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
                 steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt,
                 model_dir=root_path, loss_fn=loss_fn, summary_fn=summary_fn, double_precision=False,
                 clip_grad=True, split_train=opt.split_train, lr_sched=lr_sched)
-
+    print(f"Training time: {time.time() - t0}")
 # # test sdf speed
 else:
     test_len = 50
