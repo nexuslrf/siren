@@ -82,6 +82,11 @@ elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
         fusion_size=opt.fusion_size)
+elif opt.model_type == 'fourier':
+    model = modules.SingleBVPNet(type='relu', mode='nerf', out_features=img_dataset.img_channels, sidelength=image_resolution, 
+        split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
+        fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
+        fusion_size=opt.fusion_size, freq_params=[6., 256//2], include_coord=False)
 else:
     raise NotImplementedError
 model.cuda()
