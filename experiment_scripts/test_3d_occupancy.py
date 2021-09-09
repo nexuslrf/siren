@@ -49,9 +49,8 @@ p.add_argument('--grid_batch', type=int, default=16)
 p.add_argument('--rbatches', type=int, default=32)
 p.add_argument('--test_mode', type=str, choices=['volrend', 'mcube'], default='volrend')
 p.add_argument('--fine_pass', action='store_true')
-p.add_argument('--split_accel', action='store_true')
 p.add_argument('--last_layer_features', type=int, default=-1)
-p.add_argument('--no_cache', action='store_true')
+p.add_argument('--vrender_mode', type=str, choices=['normal', 'grid_itp', 'feat_itp'], default='grid_itp')
 # p.add_argument('--precompute', action='store_true')
 opt = p.parse_args()
 
@@ -74,18 +73,19 @@ else:
 model.load_state_dict(torch.load(opt.checkpoint_path))
 model.cuda()
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
+os.makedirs(root_path, exist_ok=True)
 print("load model!")
 if opt.test_mode == 'volrend':
     c0, c1 = (torch.as_tensor(c).float().cuda() for c in mesh_dataset.corners)
-    if opt.no_cache:
+    t0 = time.time()
+    if opt.vrender_mode=='normal':
         render_fn = lambda m,d,b,r,a: vol_render(m,d,b,r,a)
     # TODO pre-compute here!
     else:
         eps = 1e-5
-        t0 = time.time()
         bins = [torch.linspace(c0[i], c1[i]+eps, opt.resolution+1) for i in range(3)]
         dsteps = torch.stack([(c1[i] + eps - c0[i]) / opt.resolution for i in range(3)])#.cuda()
-        if opt.split_accel:
+        if opt.vrender_mode=='feat_itp':
             assert opt.split_mlp  
             with torch.no_grad():
                 feats = [model.forward_split_channel(b[...,None].cuda(), i) for i,b in enumerate(bins)]
@@ -94,15 +94,27 @@ if opt.test_mode == 'volrend':
             }
             # precompute = None
             render_fn = lambda m,d,b,r,a: vol_render_split(m,d,b,r,a,resolution=opt.resolution, precompute=precompute)
-        else:
-            bins = torch.stack(torch.meshgrid(bins[0], bins[1], bins[2]), axis=-1).view(-1, 3)
-            feats = []
-            g_batch = bins.shape[0] // opt.grid_batch + 1
-            for i in range(opt.grid_batch):
-                with torch.no_grad():
-                    input_bin = bins[i*g_batch:(i+1)*g_batch, :].cuda()
-                    feats.append(model.forward({"coords":input_bin})['model_out'])
-            feats = torch.cat(feats, dim=0).cuda()
+        else: # 'grid_itp'
+            if not opt.split_mlp:
+                bins = torch.stack(torch.meshgrid(bins[0], bins[1], bins[2]), axis=-1).view(-1, 3)
+                feats = []
+                g_batch = (bins.shape[0] - 1) // opt.grid_batch + 1
+                for i in range(opt.grid_batch):
+                    with torch.no_grad():
+                        input_bin = bins[i*g_batch:(i+1)*g_batch, :].cuda()
+                        feats.append(model.forward({"coords":input_bin})['model_out'])
+                feats = torch.cat(feats, dim=0)
+            else:
+                gen_sh = lambda i,s: [1]*i + [s] + [1] * (2-i) + [-1]
+                g_batch = (bins[2].shape[0] - 1) // opt.grid_batch + 1
+                feats = []
+                # bins[0] = bins[0].flip(0)
+                with torch.no_grad(): 
+                    feats_sp = [model.forward_split_channel(b[...,None].cuda(), i).reshape(gen_sh(i,b.shape[0])) 
+                                for i,b in enumerate(bins)]
+                    for i in range(opt.grid_batch):
+                        feats.append(model.forward_split_fusion([feats_sp[0][i*g_batch:(i+1)*g_batch]] + feats_sp[1:]).reshape(-1,1))
+                feats = torch.cat(feats, dim=0)
             precompute = {
                 'vmins': c0, 'vmaxs': c1, 'dsteps': dsteps, 'feats': feats
             }
@@ -117,7 +129,7 @@ if opt.test_mode == 'volrend':
     W = H
     focal = H * .9
     cnt = 0
-    for deg in range(0, 91, 5):
+    for deg in [35]: #range(0, 91, 5):
         c2w = pose_spherical(90. + 10 + deg, -30, R) # default: + 45
         rays = get_rays(H, W, focal, c2w[:3,:4])
         rbatch = H // opt.rbatches if opt.rbatch == 0 else opt.rbatch
@@ -128,7 +140,7 @@ if opt.test_mode == 'volrend':
         cnt += 1
     t1 = time.time()
     print(f"Time consumed: {(t1-t0)/cnt}")
-    img_path = os.path.join(root_path, f"norm_map_{H}_{deg}.png")
+    img_path = os.path.join(root_path, f"norm_map_{opt.vrender_mode}_{H}_{deg}.png")
     imageio.imsave(img_path, norm_map)
     print(f"save {img_path}")
 

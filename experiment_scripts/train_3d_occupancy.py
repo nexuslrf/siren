@@ -43,9 +43,7 @@ p.add_argument('--approx_layers', type=int, default=2)
 p.add_argument('--act_scale', type=float, default=1)
 p.add_argument('--fusion_operator', type=str, choices=['sum', 'prod'], default='prod')
 p.add_argument('--fusion_before_act', action='store_true')
-p.add_argument('--speed_test', action='store_true')
 p.add_argument('--split_train', action='store_true')
-p.add_argument('--test_dim', type=int, default=512)
 p.add_argument('-j', '--workers', default=2, type=int, help='number of data loading workers (default: 4)')
 p.add_argument('--recenter', type=str, choices=['fourier', 'siren'], default='fourier')
 p.add_argument('--lr_decay', type=float, default=0.9995395890030878) # 0.1 ** (1/5000) = 0.9995395890030878
@@ -54,8 +52,11 @@ p.add_argument('--last_layer_features', type=int, default=-1)
 p.add_argument('--n_hidden_layers', type=int, default=3)
 p.add_argument('--prep_cache', action='store_true')
 p.add_argument('--pts_cache', type=str, default="")
-
 p.add_argument('--rbatches', type=int, default=1)
+
+p.add_argument('--speed_test', action='store_true')
+p.add_argument('--test_dim', type=int, default=512)
+p.add_argument('--grid_batch', type=int, default=16)
 opt = p.parse_args()
 
 mesh_dataset = dataio.Mesh(opt.mesh_path, pts_per_batch=opt.points_per_batch, num_batches=opt.batch_size, 
@@ -110,34 +111,37 @@ else:
     test_len = 50
     if not opt.split_mlp:
         with torch.no_grad():
-            model_input = {'coords': dataio.get_mgrid(opt.test_dim, 3).cuda()}
+            model_input = dataio.get_mgrid(opt.test_dim, 3).cuda()
+            g_batch = (model_input.shape[0] - 1) // opt.grid_batch + 1
             print("test start!")
             t0 = time.time()
-            for i in range(test_len):
-                model_output = model(model_input)
-                f"{model_output['model_out'][...,0]}"
+            for j in range(test_len):
+                model_output = []
+                for i in range(opt.grid_batch):
+                    input_bin = model_input[i*g_batch:(i+1)*g_batch, :]
+                    model_output.append(model.forward({"coords":input_bin})['model_out'])
+                model_output = torch.cat(model_output, dim=0)
+                f"{model_output[...,0]}"
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/test_len}")
     else:
+        N = opt.test_dim
+        gen_sh = lambda i: [1]*i + [N] + [1] * (2-i) + [-1]
+        g_batch = (N - 1) // opt.grid_batch + 1
         with torch.no_grad():
             x = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
             y = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
             z = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
             print("test start!")
-            N = opt.test_dim
             t0 = time.time()
-            for i in range(test_len):
-                x_feat = model.forward_split_channel(x, 0)
-                y_feat = model.forward_split_channel(y, 1)
-                z_feat = model.forward_split_channel(z, 2)
-                sh = list(x_feat.shape)[1:]
-                fusion_feat = x_feat.reshape([1,1, N] + sh) + y_feat.reshape([1,N,1] + sh) + z_feat.reshape([N,1,1]+sh)
-                model_output = model.forward_split_fusion([x_feat.unsqueeze(1), y_feat.unsqueeze(0), z_feat.unsqueeze(0)])
+            for j in range(test_len):
+                x_feat = model.forward_split_channel(x, 0).reshape(gen_sh(0))
+                y_feat = model.forward_split_channel(y, 1).reshape(gen_sh(1))
+                z_feat = model.forward_split_channel(z, 2).reshape(gen_sh(2))
+                model_output = []
+                for i in range(opt.grid_batch):
+                    model_output.append(model.forward_split_fusion([x_feat[i*g_batch:(i+1)*g_batch], y_feat, z_feat]))
+                model_output = torch.cat(model_output, dim=0)
                 f"{model_output[...,0]}"
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/test_len}")
-# Test on RTX3090
-# test_dim=128, split_mlp: 0.016141505241394044
-# test_dim=128, 0.10274162769317627
-# test_dim=200, split_mlp: 0.031106233596801758
-# test_dim=200, OOM
