@@ -285,9 +285,9 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
         h_id = m_idx[0][a_nz_idx] + 1 # to avoid the first idx is 0
         w_id = m_idx[1][a_nz_idx]
         n_id = (h_id - torch.cat([torch.IntTensor([0]).cuda(), h_id[:-1]])).nonzero(as_tuple=True)[0]
-        r_id = h_id[n_id] - 1
+        # r_id = h_id[n_id] - 1
         w_id = w_id[n_id]
-        depth = z_vals[w_id]
+        depth = z_vals[torch.arange(z_vals.shape[0]), w_id] #z_vals[w_id]
         depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
             .scatter(0,r_id,depth).reshape(rays_o.shape[:-1])
         acc_map = (depth_map > 0).float()
@@ -452,12 +452,11 @@ def vol_render_nosplit(model, mesh, rbatch, rays, render_args, fine_pass=False, 
         h_id = m_idx[0][a_nz_idx] + 1 # to avoid the first idx is 0
         w_id = m_idx[1][a_nz_idx]
         n_id = (h_id - torch.cat([torch.IntTensor([0]).cuda(), h_id[:-1]])).nonzero(as_tuple=True)[0]
-        r_id = h_id[n_id] - 1
+        # r_id = h_id[n_id] - 1
         w_id = w_id[n_id]
-        depth = z_vals[w_id]
+        depth = z_vals[torch.arange(z_vals.shape[0]), w_id] #z_vals[w_id]
         depth_map = torch.zeros(rays_o.shape[:-1]).cuda().reshape(-1)\
             .scatter(0,r_id,depth).reshape(rays_o.shape[:-1])
         acc_map = (depth_map > 0).float()
-
 
     return depth_map, acc_map
