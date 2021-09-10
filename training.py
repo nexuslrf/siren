@@ -43,7 +43,7 @@ def train(model, train_dataloader, epochs, lr, steps_til_summary, epochs_til_che
     with tqdm(total=epochs) as pbar:
         train_losses = []
         # for epoch in range(epochs):
-        while total_steps < epochs:
+        while total_steps <= epochs:
 
             for step, (model_input, gt) in enumerate(train_dataloader):
                 if total_steps > epochs: break

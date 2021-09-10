@@ -46,7 +46,8 @@ p.add_argument('--fusion_before_act', action='store_true')
 p.add_argument('--image_path', type=str, default='')
 p.add_argument('--use_atten', action='store_true')
 p.add_argument('--learn_code', action='store_true')
-p.add_argument('--orth_reg', action='store_true')
+p.add_argument('--loss_type', type=str, default='mse', choices=['mse', 'l1', 'svd'])
+p.add_argument('--lr_decay', type=float, default=1) # 0.1 ** (1/10000) = 0.9997697679981565
 p.add_argument('--last_layer_features', type=int, default=-1)
 p.add_argument('--fusion_size', type=int, default=1)
 opt = p.parse_args()
@@ -94,13 +95,21 @@ model.cuda()
 root_path = os.path.join(opt.logging_root, opt.experiment_name)
 
 # Define the loss
-loss_fn = partial(loss_functions.image_mse, None) if not opt.orth_reg else loss_functions.image_svd
+if opt.loss_type == 'mse':
+    loss_fn = partial(loss_functions.image_mse, None) 
+elif  opt.loss_type == 'l1':
+    loss_fn = partial(loss_functions.image_l1, None)
+else:
+    loss_fn = loss_functions.image_svd
+
 summary_fn = partial(utils.write_image_summary, image_resolution)
+lr_sched = lambda optim: torch.optim.lr_scheduler.ExponentialLR(optim, opt.lr_decay)
 
 if not opt.speed_test:
     training.train(model=model, train_dataloader=dataloader, epochs=opt.num_epochs, lr=opt.lr,
                 steps_til_summary=opt.steps_til_summary, epochs_til_checkpoint=opt.epochs_til_ckpt, model_dir=root_path, 
-                loss_fn=loss_fn, summary_fn=summary_fn, split_train=opt.split_train, orth_reg=opt.orth_reg)
+                loss_fn=loss_fn, summary_fn=summary_fn, split_train=opt.split_train, orth_reg=(opt.loss_type=='svd'), 
+                lr_sched=lr_sched)
 # # test image
 else:
     test_len = 50
