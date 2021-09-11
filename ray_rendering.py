@@ -131,7 +131,7 @@ def get_bins(pts, resolution, vmin, vmax, eps=1e-5):
     dstep = (ubnd + eps - lbnd) / resolution
     return bins, dstep, lbnd, ubnd
 
-def get_pts_pred(model, pts_idx, feats, split=True, resolution=128):
+def get_pts_pred(model, pts_idx, feats, split=True, resolution=[128,128,128]):
     lbnd_idx = pts_idx.long()
     if split:
         ubnd_idx = lbnd_idx + 1
@@ -144,40 +144,41 @@ def get_pts_pred(model, pts_idx, feats, split=True, resolution=128):
         with torch.no_grad():
             out = model.forward_split_fusion(pts_feats)
     else:
-        num_bins = resolution + 1
+        offsets = torch.tensor([(resolution[2] + 1) * (resolution[1]+1), resolution[2]+1, 1]).cuda()
         r = pts_idx[..., 0] - lbnd_idx[..., 0]
+        # num_bins = [resolution[i] for i in range(3)]
         # lbnd_idx_mixed = torch.prod(lbnd_idx, dim=-1)
-        # interpolation along x'
+        # interpolation along x
         # y = 0, z = 0
         ubnd_idx = lbnd_idx + torch.tensor([1, 0, 0]).cuda()
         lbnd_idx_t = lbnd_idx + torch.tensor([0, 0, 0]).cuda() # for demonstration purpose...
-        lbnd_idx_mixed = lbnd_idx_t[...,0] * num_bins * num_bins + lbnd_idx_t[...,1] * num_bins + lbnd_idx_t[...,2]
+        lbnd_idx_mixed = (lbnd_idx_t * offsets).sum(-1)
         lbnd_feats = feats[lbnd_idx_mixed]
-        ubnd_idx_mixed = ubnd_idx[...,0] * num_bins * num_bins + ubnd_idx[...,1] * num_bins + ubnd_idx[...,2]
+        ubnd_idx_mixed = (ubnd_idx * offsets).sum(-1)
         ubnd_feats = feats[ubnd_idx_mixed]
         pts_feats_00 = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
         # y = 0, z = 1
         ubnd_idx = lbnd_idx + torch.tensor([1, 0, 1]).cuda()
         lbnd_idx_t = lbnd_idx + torch.tensor([0, 0, 1]).cuda()
-        lbnd_idx_mixed = lbnd_idx_t[...,0] * num_bins * num_bins + lbnd_idx_t[...,1] * num_bins + lbnd_idx_t[...,2]
+        lbnd_idx_mixed = (lbnd_idx_t * offsets).sum(-1)
         lbnd_feats = feats[lbnd_idx_mixed]
-        ubnd_idx_mixed = ubnd_idx[...,0] * num_bins * num_bins + ubnd_idx[...,1] * num_bins + ubnd_idx[...,2]
+        ubnd_idx_mixed = (ubnd_idx * offsets).sum(-1)
         ubnd_feats = feats[ubnd_idx_mixed]
         pts_feats_01 = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
         # y = 1, z = 0
         ubnd_idx = lbnd_idx + torch.tensor([1, 1, 0]).cuda()
         lbnd_idx_t = lbnd_idx + torch.tensor([0, 1, 0]).cuda()
-        lbnd_idx_mixed = lbnd_idx_t[...,0] * num_bins * num_bins + lbnd_idx_t[...,1] * num_bins + lbnd_idx_t[...,2]
+        lbnd_idx_mixed = (lbnd_idx_t * offsets).sum(-1)
         lbnd_feats = feats[lbnd_idx_mixed]
-        ubnd_idx_mixed = ubnd_idx[...,0] * num_bins * num_bins + ubnd_idx[...,1] * num_bins + ubnd_idx[...,2]
+        ubnd_idx_mixed = (ubnd_idx * offsets).sum(-1)
         ubnd_feats = feats[ubnd_idx_mixed]
         pts_feats_10 = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
         # y = 1, z = 1
         ubnd_idx = lbnd_idx + torch.tensor([1, 1, 1]).cuda()
         lbnd_idx_t = lbnd_idx + torch.tensor([0, 1, 1]).cuda()
-        lbnd_idx_mixed = lbnd_idx_t[...,0] * num_bins * num_bins + lbnd_idx_t[...,1] * num_bins + lbnd_idx_t[...,2]
+        lbnd_idx_mixed = (lbnd_idx_t * offsets).sum(-1)
         lbnd_feats = feats[lbnd_idx_mixed]
-        ubnd_idx_mixed = ubnd_idx[...,0] * num_bins * num_bins + ubnd_idx[...,1] * num_bins + ubnd_idx[...,2]
+        ubnd_idx_mixed = (ubnd_idx * offsets).sum(-1)
         ubnd_feats = feats[ubnd_idx_mixed]
         pts_feats_11 = (lbnd_feats * (1 - r).T[...,None] + r.T[...,None] * ubnd_feats)
 
@@ -213,8 +214,12 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
     if precompute is None:
         bins, dsteps = [], []
         vmins, vmaxs = [], []
+        try:
+            z = resolution[1]
+        except:
+            resolution = [resolution] * 3
         for i in range(3):
-            bin,dstep,vmin,vmax = get_bins(pts[...,i], resolution, c0[i], c1[i])
+            bin,dstep,vmin,vmax = get_bins(pts[...,i], resolution[i], c0[i], c1[i])
             dsteps.append(dstep)
             vmins.append(vmin); vmaxs.append(vmax)
             bins.append(bin)
@@ -367,6 +372,10 @@ def vol_render_split(model, mesh, rbatch, rays, render_args, fine_pass=False, re
 def vol_render_nosplit(model, mesh, rbatch, rays, render_args, fine_pass=False, resolution=256, grid_batch=16, precompute=None):
 
     corners, near, far, N_samples, N_samples_2, clip, pts_trans_fn = render_args[:7]
+    try:
+        z = resolution[1]
+    except:
+        resolution = [resolution] * 3
     if len(render_args) > 7: fine_pass = render_args[7]
 
     rays_o, rays_d = rays[0].cuda(), rays[1].cuda()
@@ -383,7 +392,7 @@ def vol_render_nosplit(model, mesh, rbatch, rays, render_args, fine_pass=False, 
         bins, dsteps = [], []
         vmins, vmaxs = [], []
         for i in range(3):
-            bin,dstep,vmin,vmax = get_bins(pts[...,i], resolution, c0[i], c1[i])
+            bin,dstep,vmin,vmax = get_bins(pts[...,i], resolution[i], c0[i], c1[i])
             dsteps.append(dstep)
             vmins.append(vmin); vmaxs.append(vmax)
             bins.append(bin)
