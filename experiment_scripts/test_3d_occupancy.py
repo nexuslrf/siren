@@ -51,6 +51,8 @@ p.add_argument('--test_mode', type=str, choices=['volrend', 'mcube'], default='v
 p.add_argument('--fine_pass', action='store_true')
 p.add_argument('--last_layer_features', type=int, default=-1)
 p.add_argument('--vrender_mode', type=str, choices=['normal', 'grid_itp', 'feat_itp', 'gt'], default='grid_itp')
+p.add_argument('--vr_deg', type=int, default=90)
+p.add_argument('--vr_phi', type=int, default=0)
 # p.add_argument('--precompute', action='store_true')
 opt = p.parse_args()
 
@@ -66,8 +68,8 @@ W = H
 focal = H * .9
 N_samples = 256
 N_samples_2 = 256 # We will consider second level sampling later
-test_degs=[90]
-phi=0#-30
+test_degs=[opt.vr_deg]
+phi=opt.vr_phi #-30
 
 if opt.test_mode=='volrend' and opt.vrender_mode=='gt':
     for deg in test_degs: #range(0, 91, 5):
@@ -75,7 +77,7 @@ if opt.test_mode=='volrend' and opt.vrender_mode=='gt':
         rays = get_rays(H, W, focal, c2w[:3,:4])
         mesh_normal_map = render_mesh_normals(mesh_dataset.mesh, rays)
         norm_map = ((mesh_normal_map * .5 + .5) * 255).astype(np.uint8)
-        img_path = os.path.join(root_path, f"norm_map_{opt.vrender_mode}_{H}_{deg}.png")
+        img_path = os.path.join(root_path, f"norm_map_{opt.vrender_mode}_{H}_{deg}_{phi}.png")
         imageio.imsave(img_path, norm_map)
         print(f"save {img_path}")
         exit()
@@ -158,7 +160,7 @@ if opt.test_mode == 'volrend':
         cnt += 1
     t1 = time.time()
     print(f"Time consumed: {(t1-t0)/cnt}")
-    img_path = os.path.join(root_path, f"norm_map_{opt.vrender_mode}_{H}_{deg}.png")
+    img_path = os.path.join(root_path, f"norm_map_{opt.vrender_mode}_{H}_{deg}_{phi}.png")
     imageio.imsave(img_path, norm_map)
     print(f"save {img_path}")
 
