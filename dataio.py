@@ -673,6 +673,9 @@ class ImageFile(Dataset):
         super().__init__()
         self.img = Image.open(filename)
         self.img_channels = len(self.img.mode)
+        if self.img_channels == 4:
+            self.img = self.img.convert("RGB")
+            self.img_channels = 3
 
     def __len__(self):
         return 1
