@@ -9,7 +9,7 @@ import skimage.io
 import torch
 from torch.utils.data import DataLoader
 import configargparse
-from functools import partial
+from functools import partial, reduce
 
 p = configargparse.ArgumentParser()
 p.add('-c', '--config_filepath', required=False, is_config_file=True, help='Path to config file.')
@@ -50,6 +50,8 @@ p.add_argument('--loss_type', type=str, default='mse', choices=['mse', 'l1', 'sv
 p.add_argument('--lr_decay', type=float, default=1) # 0.1 ** (1/10000) = 0.9997697679981565
 p.add_argument('--last_layer_features', type=int, default=-1)
 p.add_argument('--fusion_size', type=int, default=1)
+p.add_argument('--hidden_features', type=int, default=256)
+p.add_argument('--aug_reduce_param', action='store_true')
 opt = p.parse_args()
 
 if opt.split_train:
@@ -77,17 +79,17 @@ if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'ta
     model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', out_features=img_dataset.img_channels, sidelength=image_resolution, 
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
-        fusion_size=opt.fusion_size)
+        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, reduced=opt.aug_reduce_param)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
     model = modules.SingleBVPNet(type='relu', mode=opt.model_type, out_features=img_dataset.img_channels, sidelength=image_resolution, 
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
-        fusion_size=opt.fusion_size)
+        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, reduced=opt.aug_reduce_param)
 elif opt.model_type == 'fourier':
     model = modules.SingleBVPNet(type='relu', mode='nerf', out_features=img_dataset.img_channels, sidelength=image_resolution, 
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
-        fusion_size=opt.fusion_size, freq_params=[6., 256//2], include_coord=False)
+        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, freq_params=[6., 256//2], include_coord=False, reduced=opt.aug_reduce_param)
 else:
     raise NotImplementedError
 model.cuda()

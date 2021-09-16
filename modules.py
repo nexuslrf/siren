@@ -45,7 +45,7 @@ class FCBlock(MetaModule):
     '''
 
     def __init__(self, in_features, out_features, num_hidden_layers, hidden_features,
-                 outermost_linear=False, nonlinearity='relu', weight_init=None):
+                 outermost_linear=False, nonlinearity='relu', weight_init=None, approx_layers=2, fusion_size=1):
         super().__init__()
 
         self.first_layer_init = None
@@ -67,14 +67,20 @@ class FCBlock(MetaModule):
         else:
             self.weight_init = nl_weight_init
 
+        in_size = hidden_features * fusion_size
+        out_size = hidden_features * fusion_size
+
         self.net = []
         self.net.append(MetaSequential(
-            BatchLinear(in_features, hidden_features), nl
+            BatchLinear(in_features, out_size), nl
         ))
-
         for i in range(num_hidden_layers):
+            if i+1 == approx_layers:
+                out_size = hidden_features
+            if i == approx_layers:
+                in_size = hidden_features
             self.net.append(MetaSequential(
-                BatchLinear(hidden_features, hidden_features), nl
+                BatchLinear(in_size, out_size), nl
             ))
 
         if outermost_linear:
@@ -128,7 +134,7 @@ class SplitFCBlock(MetaModule):
 
     def __init__(self, in_features, out_features, num_hidden_layers, hidden_features, outermost_linear=False, 
             nonlinearity='relu', weight_init=None, coord_dim=2, approx_layers=2, split_rule=None, fusion_operator='sum', 
-            act_scale=1, fusion_before_act=False, use_atten=False, learn_code=False, last_layer_features=-1, fusion_size=1):
+            act_scale=1, fusion_before_act=False, use_atten=False, learn_code=False, last_layer_features=-1, fusion_size=1, reduced=False):
         super().__init__()
         self.first_layer_init = None
         self.coord_dim = coord_dim
@@ -176,8 +182,9 @@ class SplitFCBlock(MetaModule):
         else:
             self.weight_init = nl_weight_init
 
+        s = 1 if reduced else fusion_size
         self.coord_linears = nn.ModuleList(
-            [BatchLinear(feat, hidden_features*fusion_size) for feat in self.feat_per_channel]
+            [BatchLinear(feat, hidden_features*s) for feat in self.feat_per_channel]
         )
         self.coord_nl = nl
         self.coord_nl.split_scale = split_scale
@@ -189,9 +196,13 @@ class SplitFCBlock(MetaModule):
  
         self.net = []
         i = -1
-        for i in range(min(approx_layers, num_hidden_layers)):
+        for i in range(min(approx_layers, num_hidden_layers)-1):
             self.net.append(MetaSequential(
-                BatchLinear(hidden_features*fusion_size, hidden_features*fusion_size), nl
+                BatchLinear(hidden_features*s, hidden_features*s), nl
+            ))
+        i+=1
+        self.net.append(MetaSequential(
+                BatchLinear(hidden_features*s, hidden_features*fusion_size), nl
             ))
         for j in range(i+1, num_hidden_layers):
             self.net.append(MetaSequential(
@@ -387,7 +398,8 @@ class SingleBVPNet(MetaModule):
                                                     downsample=kwargs.get('downsample', False))
         if not split_mlp:
             self.net = FCBlock(in_features=in_features, out_features=out_features, num_hidden_layers=num_hidden_layers,
-                               hidden_features=hidden_features, outermost_linear=True, nonlinearity=type)
+                               hidden_features=hidden_features, outermost_linear=True, nonlinearity=type,
+                               approx_layers=kwargs.get('approx_layers', 2), fusion_size=kwargs.get("fusion_size", 1))
         else:
             self.net = SplitFCBlock(in_features=in_features, out_features=out_features, num_hidden_layers=num_hidden_layers,
                                hidden_features=hidden_features, outermost_linear=True, nonlinearity=type, coord_dim=coord_dim, split_rule=split_rule, 
@@ -398,7 +410,8 @@ class SingleBVPNet(MetaModule):
                                use_atten=kwargs.get("use_atten", False),
                                learn_code=kwargs.get("learn_code", False),
                                last_layer_features=kwargs.get("last_layer_features", -1),
-                               fusion_size=kwargs.get("fusion_size", 1)
+                               fusion_size=kwargs.get("fusion_size", 1),
+                               reduced=kwargs.get('reduced', False)
                                )
         print(self)
 
