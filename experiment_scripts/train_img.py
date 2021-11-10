@@ -114,7 +114,7 @@ if not opt.speed_test:
                 lr_sched=lr_sched)
 # # test image
 else:
-    test_len = 50
+    test_len = 100
     if not opt.split_mlp:
         with torch.no_grad():
             model_input = {'coords': dataio.get_mgrid(opt.test_dim).cuda()}

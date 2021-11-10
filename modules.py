@@ -44,8 +44,8 @@ class FCBlock(MetaModule):
     Can be used just as a normal neural network though, as well.
     '''
 
-    def __init__(self, in_features, out_features, num_hidden_layers, hidden_features,
-                 outermost_linear=False, nonlinearity='relu', weight_init=None, approx_layers=2, fusion_size=1):
+    def __init__(self, in_features, out_features, num_hidden_layers, hidden_features, outermost_linear=False, 
+        nonlinearity='relu', weight_init=None, approx_layers=2, fusion_size=1, reduced=False):
         super().__init__()
 
         self.first_layer_init = None
@@ -67,8 +67,9 @@ class FCBlock(MetaModule):
         else:
             self.weight_init = nl_weight_init
 
-        in_size = hidden_features * fusion_size
-        out_size = hidden_features * fusion_size
+        s = 1 if reduced else fusion_size
+        in_size = hidden_features * s
+        out_size = hidden_features * s
 
         self.net = []
         self.net.append(MetaSequential(
@@ -76,18 +77,19 @@ class FCBlock(MetaModule):
         ))
         for i in range(num_hidden_layers):
             if i+1 == approx_layers:
-                out_size = hidden_features
+                out_size = hidden_features if not reduced else hidden_features * fusion_size
             if i == approx_layers:
-                in_size = hidden_features
+                out_size = hidden_features
             self.net.append(MetaSequential(
                 BatchLinear(in_size, out_size), nl
             ))
+            in_size = out_size
 
         if outermost_linear:
-            self.net.append(MetaSequential(BatchLinear(hidden_features, out_features)))
+            self.net.append(MetaSequential(BatchLinear(in_size, out_features)))
         else:
             self.net.append(MetaSequential(
-                BatchLinear(hidden_features, out_features), nl
+                BatchLinear(in_size, out_features), nl
             ))
 
         self.net = MetaSequential(*self.net)
@@ -399,7 +401,8 @@ class SingleBVPNet(MetaModule):
         if not split_mlp:
             self.net = FCBlock(in_features=in_features, out_features=out_features, num_hidden_layers=num_hidden_layers,
                                hidden_features=hidden_features, outermost_linear=True, nonlinearity=type,
-                               approx_layers=kwargs.get('approx_layers', 2), fusion_size=kwargs.get("fusion_size", 1))
+                               approx_layers=kwargs.get('approx_layers', 2), fusion_size=kwargs.get("fusion_size", 1),
+                               reduced=kwargs.get('reduced', False))
         else:
             self.net = SplitFCBlock(in_features=in_features, out_features=out_features, num_hidden_layers=num_hidden_layers,
                                hidden_features=hidden_features, outermost_linear=True, nonlinearity=type, coord_dim=coord_dim, split_rule=split_rule, 
