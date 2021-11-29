@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 import configargparse
 from functools import partial, reduce
+import tqdm
 
 p = configargparse.ArgumentParser()
 p.add('-c', '--config_filepath', required=False, is_config_file=True, help='Path to config file.')
@@ -17,6 +18,8 @@ p.add('-c', '--config_filepath', required=False, is_config_file=True, help='Path
 p.add_argument('--logging_root', type=str, default='./logs', help='root for logging')
 p.add_argument('--experiment_name', type=str, required=True,
                help='Name of subdirectory in logging_root where summaries and checkpoints will be saved.')
+
+p.add_argument('--num_hidden_layers', type=int, default=3)
 
 # General training options
 p.add_argument('--batch_size', type=int, default=1)
@@ -79,17 +82,17 @@ if opt.model_type == 'sine' or opt.model_type == 'relu' or opt.model_type == 'ta
     model = modules.SingleBVPNet(type=opt.model_type, mode='mlp', out_features=img_dataset.img_channels, sidelength=image_resolution, 
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
-        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, reduced=opt.aug_reduce_param)
+        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, reduced=opt.aug_reduce_param, num_hidden_layers=opt.num_hidden_layers)
 elif opt.model_type == 'rbf' or opt.model_type == 'nerf':
     model = modules.SingleBVPNet(type='relu', mode=opt.model_type, out_features=img_dataset.img_channels, sidelength=image_resolution, 
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
-        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, reduced=opt.aug_reduce_param)
+        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, reduced=opt.aug_reduce_param, num_hidden_layers=opt.num_hidden_layers)
 elif opt.model_type == 'fourier':
     model = modules.SingleBVPNet(type='relu', mode='nerf', out_features=img_dataset.img_channels, sidelength=image_resolution, 
         split_mlp=opt.split_mlp, approx_layers=opt.approx_layers, act_scale=opt.act_scale, fusion_operator=opt.fusion_operator,
         fusion_before_act=opt.fusion_before_act, use_atten=opt.use_atten, learn_code=opt.learn_code, last_layer_features=opt.last_layer_features,
-        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, freq_params=[6., 256//2], include_coord=False, reduced=opt.aug_reduce_param)
+        fusion_size=opt.fusion_size, hidden_features=opt.hidden_features, freq_params=[6., 256//2], include_coord=False, reduced=opt.aug_reduce_param, num_hidden_layers=opt.num_hidden_layers)
 else:
     raise NotImplementedError
 model.cuda()
@@ -114,7 +117,7 @@ if not opt.speed_test:
                 lr_sched=lr_sched)
 # # test image
 else:
-    test_len = 100
+    test_len = 10
     if not opt.split_mlp:
         with torch.no_grad():
             model_input = {'coords': dataio.get_mgrid(opt.test_dim).cuda()}
@@ -126,13 +129,19 @@ else:
             print(f"Time consumed: {(t1-t0)/test_len}")
     else:
         with torch.no_grad():
+            g_batch = 128
             x = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
             y = torch.linspace(-1,1,opt.test_dim).unsqueeze(-1).cuda()
             t0 = time.time()
-            for i in range(test_len):
+            for k in tqdm.tqdm(range(test_len)):
+                model_output = []
                 x_feat = model.forward_split_channel(x, 0).unsqueeze(1)
                 y_feat = model.forward_split_channel(y, 1).unsqueeze(0)
-                model_output = model.forward_split_fusion([x_feat, y_feat])
+                for i in tqdm.tqdm(range(0, opt.test_dim, g_batch)):
+                    model_output.append(model.forward_split_fusion([x_feat[i:i+g_batch], y_feat]))
+                model_output = torch.cat(model_output, dim=0)
+                # model_output = model.forward_split_fusion([x_feat, y_feat])
                 f"{model_output[...,0]}"
+                del model_output
             t1 = time.time()
             print(f"Time consumed: {(t1-t0)/test_len}")
